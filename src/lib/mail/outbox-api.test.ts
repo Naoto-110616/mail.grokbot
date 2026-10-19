@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { IncomingMessage } from "node:http";
 import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,9 +12,12 @@ import type { Sql } from "../db.ts";
 import { SESSION_COOKIE, sessionAllowed, signSession, type GateDeps } from "../site-gate/gate.ts";
 import { handleIngestApi, upsertMessage } from "../../server/mail/ingest-api.server.ts";
 import { threadsFromMessages } from "../../server/mail/ingest.server.ts";
-import { handleOutboxApi, type OutboxApiDeps } from "../../server/mail/outbox-api.server.ts";
+import { loadMailConfig, saveMailboxConnection, toPublicConfig } from "../../server/mail/config.server.ts";
+import { handleOutboxApi, transitionOutbound, type OutboxApiDeps } from "../../server/mail/outbox-api.server.ts";
+import { recordWakeResult, requeueFailedSend, runDueWakes } from "../../server/mail/wake.server.ts";
 import { deleteOutboundForMailbox } from "../../server/mail/outbound-delete.ts";
 import { QUEUED_TOAST, outboxItemsForThreads, outboxStatusLabel } from "./outbox.ts";
+import { WAKE_LEASE_MS } from "./wake-retry.ts";
 import { emptyMailbox, inFolder, type Message } from "./model.ts";
 
 const TOKEN = "outbox-test-token";
@@ -22,7 +27,14 @@ const WAKE_FAILURE = "Grok Bot did not wake. This reply was not sent.";
 const STORED = ["queued", "waiting", "pending", "awaiting_approval", "sent", "declined", "failed", "cancelled"] as const;
 const POSTED = ["awaiting_approval", "sent", "declined", "failed", "queued"] as const;
 
-const sqlFiles = ["0002_mail.sql", "0004_mail_ingest.sql", "0005_mail_thread_hint.sql", "0006_mail_direction.sql", "0008_mail_outbound_bridge.sql"];
+const sqlFiles = [
+  "0002_mail.sql",
+  "0004_mail_ingest.sql",
+  "0005_mail_thread_hint.sql",
+  "0006_mail_direction.sql",
+  "0008_mail_outbound_bridge.sql",
+  "0010_mail_mailbox_config.sql",
+];
 
 function wrap(pg: PGlite): Sql {
   const run = async <T>(text: string, params: unknown[]): Promise<T[]> => {
@@ -206,8 +218,9 @@ function enableAlias(): void {
 
 describe("outbox copy", () => {
   it("uses the queued strings", () => {
-    assert.equal(QUEUED_TOAST, "Queued for approval in Grok Bot");
-    assert.equal(outboxStatusLabel("queued", null), "Waiting for your OK in Grok Bot");
+    assert.equal(QUEUED_TOAST, "Sending…");
+    assert.equal(outboxStatusLabel("queued", null), "Sending…");
+    assert.equal(outboxStatusLabel("queued", "HTTP 503"), "Sending…");
     assert.equal(outboxStatusLabel("awaiting_approval", "x"), "Waiting for your OK in Grok Bot");
     assert.equal(outboxStatusLabel("sent", null), "Sent");
     assert.equal(outboxStatusLabel("declined", null), "Declined");
@@ -699,6 +712,8 @@ describe("outbox api", () => {
       );
       assert.equal(result.notice, QUEUED_TOAST);
       assert.equal(result.notice.includes("did not wake"), false);
+      assert.equal(result.notice.includes("not sent"), false);
+      assert.equal(result.notice.toLowerCase().includes("reply"), false);
       assert.notEqual(result.notice, WAKE_FAILURE);
       assert.equal(result.delivery, "waiting");
       const signed = "Typed body\n\n--\nYou\nyou@example.test";
@@ -712,6 +727,212 @@ describe("outbox api", () => {
       else process.env.DATABASE_URL_UNPOOLED = previousUnpooled;
       if (previousStub === undefined) delete process.env.OUTBOX_STUB_DB;
       else process.env.OUTBOX_STUB_DB = previousStub;
+    }
+  });
+});
+
+const SENDER_KEY = "sender-key-example";
+
+type WakeRow = {
+  status: string;
+  attempt_count: number | string;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  error: string | null;
+};
+
+async function wakeRow(sql: Sql, id: string): Promise<WakeRow> {
+  const rows = await sql.query<WakeRow>(
+    `select status, attempt_count, next_attempt_at, last_error, error from mail_outbound where client_send_id = $1`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("missing row");
+  return row;
+}
+
+describe("wake retries", () => {
+  it("exhausts five failures into Failed and Retry re-queues", async () => {
+    const db = await database();
+    try {
+      await seed(db.sql, { id: "send_wake", status: "queued", createdAt: "2026-10-19T12:00:00.000Z" });
+      const now = Date.parse("2026-10-19T12:00:00.000Z");
+      const delays = [30_000, 120_000, 600_000, 3_600_000];
+      for (let attempt = 1; attempt <= 4; attempt += 1) {
+        await recordWakeResult(db.sql, "send_wake", { ok: false, status: 503, error: "http" }, now);
+        const row = await wakeRow(db.sql, "send_wake");
+        assert.equal(row.status, "queued");
+        assert.equal(Number(row.attempt_count), attempt);
+        assert.equal(row.next_attempt_at, new Date(now + (delays[attempt - 1] ?? 0)).toISOString());
+        assert.equal(row.last_error, "HTTP 503");
+        assert.equal(row.error, null);
+        assert.equal(outboxStatusLabel("queued", row.error), QUEUED_TOAST);
+      }
+      await recordWakeResult(db.sql, "send_wake", { ok: false, status: 503, error: "http" }, now);
+      const failed = await wakeRow(db.sql, "send_wake");
+      assert.equal(failed.status, "failed");
+      assert.equal(Number(failed.attempt_count), 5);
+      assert.equal(failed.next_attempt_at, null);
+      assert.equal(failed.last_error, "HTTP 503");
+      assert.equal(failed.error, "HTTP 503");
+      assert.equal(outboxStatusLabel("failed", failed.error), "Failed: HTTP 503");
+
+      assert.equal(await requeueFailedSend(db.sql, "send_wake", now), true);
+      const again = await wakeRow(db.sql, "send_wake");
+      assert.equal(again.status, "queued");
+      assert.equal(Number(again.attempt_count), 0);
+      assert.equal(again.error, null);
+      assert.equal(again.last_error, null);
+      assert.equal(again.next_attempt_at, new Date(now + WAKE_LEASE_MS).toISOString());
+
+      await recordWakeResult(db.sql, "send_wake", { ok: false, status: 503, error: "http" }, now);
+      const retried = await wakeRow(db.sql, "send_wake");
+      assert.equal(retried.status, "queued");
+      assert.equal(Number(retried.attempt_count), 1);
+      assert.equal(outboxStatusLabel("queued", retried.error), "Sending…");
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("uses the file only when the mailbox row is absent", async () => {
+    const db = await database();
+    const root = await mkdtemp(join(tmpdir(), "mail-file-config-"));
+    try {
+      await mkdir(join(root, "data"));
+      await writeFile(
+        join(root, "data", "config.json"),
+        JSON.stringify({
+          webhookUrl: "https://example.com/from-file",
+          webhookKey: "file-key",
+          headerMode: "bearer",
+        }),
+      );
+      const loaded = await loadMailConfig(root, db.sql);
+      assert.equal(loaded.secrets?.webhookUrl, "https://example.com/from-file");
+      assert.equal(loaded.secrets?.webhookKey, "file-key");
+      assert.equal(JSON.stringify(loaded.delivery).includes("file-key"), false);
+      assert.equal(JSON.stringify(toPublicConfig(loaded)).includes("file-key"), false);
+      assert.equal(JSON.stringify(toPublicConfig(loaded)).includes("example.com"), false);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("keeps the sender key off browser payloads and wakes with no message content", async () => {
+    const db = await database();
+    const root = await mkdtemp(join(tmpdir(), "mail-wake-"));
+    let seen: { headers: IncomingMessage["headers"]; body: Record<string, unknown> } | null = null;
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        seen = {
+          headers: req.headers,
+          body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>,
+        };
+        res.writeHead(200);
+        res.end("{}");
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve());
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("no port");
+    const url = `http://127.0.0.1:${address.port}/hook`;
+    try {
+      const saved = await saveMailboxConnection(db.sql, { webhookUrl: url, webhookKey: SENDER_KEY, headerMode: "bearer" }, root);
+      assert.equal(JSON.stringify(saved).includes(SENDER_KEY), false);
+      assert.equal(saved.keySet, true);
+      assert.deepEqual(Object.keys(saved).sort(), ["headerMode", "keySet", "webhookUrl"]);
+
+      const kept = await saveMailboxConnection(
+        db.sql,
+        { webhookUrl: "https://example.com/hook", webhookKey: "", headerMode: "x-webhook-key" },
+        root,
+      );
+      assert.equal(kept.keySet, true);
+      assert.equal(kept.headerMode, "x-webhook-key");
+      assert.equal(kept.webhookUrl, "https://example.com/hook");
+      assert.equal(JSON.stringify(kept).includes(SENDER_KEY), false);
+
+      await assert.rejects(
+        () =>
+          saveMailboxConnection(
+            db.sql,
+            { webhookUrl: "https://user:secret@example.com/hook", webhookKey: "next-key", headerMode: "bearer" },
+            root,
+          ),
+        /invalid/,
+      );
+      await assert.rejects(
+        () => saveMailboxConnection(db.sql, { webhookUrl: "ftp://example.com/hook", webhookKey: "next-key", headerMode: "bearer" }, root),
+        /invalid/,
+      );
+
+      await mkdir(join(root, "data"));
+      await writeFile(
+        join(root, "data", "config.json"),
+        JSON.stringify({ webhookUrl: "https://file.example.com/hook", webhookKey: "file-key", headerMode: "bearer" }),
+      );
+      const fromRow = await loadMailConfig(root, db.sql);
+      assert.equal(fromRow.secrets?.webhookUrl, "https://example.com/hook");
+      assert.equal(fromRow.secrets?.webhookKey, SENDER_KEY);
+      assert.equal(fromRow.secrets?.headerMode, "x-webhook-key");
+      assert.equal(JSON.stringify(fromRow.delivery).includes(SENDER_KEY), false);
+      assert.equal(JSON.stringify(toPublicConfig(fromRow)).includes(SENDER_KEY), false);
+      assert.equal(JSON.stringify(toPublicConfig(fromRow)).includes("webhookUrl"), false);
+
+      const cleared = await saveMailboxConnection(db.sql, { webhookUrl: "", webhookKey: "", headerMode: "bearer" }, root);
+      assert.equal(cleared.webhookUrl, "");
+      assert.equal(cleared.keySet, true);
+      assert.equal((await loadMailConfig(root, db.sql)).secrets, null);
+
+      await saveMailboxConnection(db.sql, { webhookUrl: url, webhookKey: "", headerMode: "bearer" }, root);
+      await seed(db.sql, { id: "send_due", status: "queued", createdAt: "2026-10-19T12:00:00.000Z" });
+      await db.sql.query(`update mail_outbound set next_attempt_at = $2 where client_send_id = $1`, [
+        "send_due",
+        "2020-01-01T00:00:00.000Z",
+      ]);
+      await runDueWakes(db.sql, root, Date.parse("2026-10-19T12:00:00.000Z"));
+      assert.ok(seen);
+      const posted = seen as { headers: IncomingMessage["headers"]; body: Record<string, unknown> };
+      assert.deepEqual(posted.body, { action: "send", clientSendId: "send_due" });
+      assert.equal(posted.headers.authorization, `Bearer ${SENDER_KEY}`);
+      assert.equal(posted.headers["x-webhook-key"], undefined);
+      assert.equal(posted.headers["x-automation-key"], undefined);
+      assert.equal(JSON.stringify(posted.body).includes(SENDER_KEY), false);
+      for (const field of ["subject", "text", "from", "to", "cc", "bcc", "attachments"]) {
+        assert.equal(field in posted.body, false, field);
+      }
+      const after = await wakeRow(db.sql, "send_due");
+      assert.equal(after.status, "queued");
+      assert.equal(Number(after.attempt_count), 1);
+      assert.equal(after.next_attempt_at, null);
+      assert.equal(after.last_error, null);
+
+      await seed(db.sql, { id: "send_bot", status: "awaiting_approval", createdAt: "2026-10-19T12:00:00.000Z" });
+      await db.sql.query(`update mail_outbound set next_attempt_at = $2, last_error = $3 where client_send_id = $1`, [
+        "send_bot",
+        "2020-01-01T00:00:00.000Z",
+        "old",
+      ]);
+      const moved = await transitionOutbound(db.sql, "send_bot", {
+        status: "failed",
+        providerMessageId: null,
+        error: "smtp down",
+      });
+      assert.equal(moved.ok, true);
+      const bot = await wakeRow(db.sql, "send_bot");
+      assert.equal(bot.status, "failed");
+      assert.equal(bot.error, "smtp down");
+      assert.equal(bot.last_error, "smtp down");
+      assert.equal(bot.next_attempt_at, null);
+      assert.equal(outboxStatusLabel("failed", bot.error), "Failed: smtp down");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await db.close();
     }
   });
 });

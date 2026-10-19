@@ -10,6 +10,7 @@ import {
 import { normalizePath } from "../../lib/site-gate/paths.ts";
 import type { SendResult } from "./ingest.server.ts";
 import { ingestTokenMatches, upsertMessage } from "./ingest-api.server.ts";
+import { runDueWakes } from "./wake.server.ts";
 
 export type OutboxApiDeps = {
   /** When set, this object is the only token source. A blank value rejects every bot call. */
@@ -242,6 +243,8 @@ export async function transitionOutbound(sql: Sql, id: string, input: StatusInpu
        status = $2,
        provider_message_id = coalesce($3, provider_message_id),
        error = $4,
+       last_error = case when $2 = 'failed' then $4 else last_error end,
+       next_attempt_at = null,
        updated_at = $5
      where client_send_id = $1 and ${guardSql(input.status)}
      returning client_send_id`,
@@ -350,6 +353,14 @@ async function withTransaction(sql: Sql, run: () => Promise<TransitionResult>): 
   }
 }
 
+async function runDueQuiet(sql: Sql): Promise<void> {
+  try {
+    await runDueWakes(sql);
+  } catch {
+    // A missing column or a wake error must not fail this request.
+  }
+}
+
 function decodeId(value: string): string | null {
   try {
     const id = decodeURIComponent(value);
@@ -375,7 +386,9 @@ export async function handleOutboxApi(request: Request, deps: OutboxApiDeps = {}
     const status = new URL(request.url).searchParams.get("status");
     if (status !== "queued") return json(400, { error: "invalid" });
     try {
-      return await listQueued(await database(deps));
+      const sql = await database(deps);
+      await runDueQuiet(sql);
+      return await listQueued(sql);
     } catch (err) {
       console.error("[outbox] list failed", err instanceof Error ? err.name : "error");
       return json(503, { error: "unavailable" });
@@ -393,6 +406,7 @@ export async function handleOutboxApi(request: Request, deps: OutboxApiDeps = {}
     if (body instanceof Response) return body;
     try {
       const sql = await database(deps);
+      await runDueQuiet(sql);
       return await withTransaction(sql, () => transitionOutbound(sql, id, body));
     } catch (err) {
       console.error("[outbox] status failed", err instanceof Error ? err.name : "error");
@@ -414,6 +428,7 @@ export async function handleOutboxApi(request: Request, deps: OutboxApiDeps = {}
     if (!id) return json(404, { error: "not found" });
     try {
       const sql = await database(deps);
+      await runDueQuiet(sql);
       return await withTransaction(sql, () =>
         transitionOutbound(sql, id, { status: "cancelled", providerMessageId: null, error: null }),
       );

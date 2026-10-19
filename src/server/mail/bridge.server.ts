@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { WebhookBody } from "../../lib/mail/webhook-body.ts";
+import { pingWebhook, type WebhookBody } from "../../lib/mail/webhook-body.ts";
 import { webhookTarget, type MailSecrets } from "./config.server.ts";
 
 const TIMEOUT_MS = 8_000;
@@ -23,6 +23,12 @@ async function writeOutbox(path: string, action: string, status: number | null, 
   await appendFile(path, outboxRecord(action, status, error), "utf8");
 }
 
+/** One header. Bearer unless the saved connection asks for the webhook-key header. */
+export function webhookAuthHeaders(target: MailSecrets): Record<string, string> {
+  if (target.headerMode === "x-webhook-key") return { "x-webhook-key": target.webhookKey };
+  return { authorization: `Bearer ${target.webhookKey}` };
+}
+
 /** One POST. A 200 means the bot woke up. The response body is ignored. */
 export async function deliverWebhook(
   target: MailSecrets,
@@ -37,8 +43,7 @@ export async function deliverWebhook(
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${target.webhookKey}`,
-        "x-automation-key": target.webhookKey,
+        ...webhookAuthHeaders(target),
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
@@ -57,4 +62,12 @@ export async function deliverConfigured(body: WebhookBody, root = process.cwd())
   const target = await webhookTarget(root);
   if (!target) return { ok: false, status: null, error: "unconfigured" };
   return deliverWebhook(target, body, { outboxPath: join(root, "data", "outbox.log") });
+}
+
+/** POST `{ action: "ping" }` to the saved connection. The browser only receives the status. */
+export async function pingBot(root = process.cwd()): Promise<{ status: number | null }> {
+  const target = await webhookTarget(root);
+  if (!target) return { status: null };
+  const result = await deliverWebhook(target, pingWebhook(), { outboxPath: join(root, "data", "outbox.log") });
+  return { status: result.status };
 }

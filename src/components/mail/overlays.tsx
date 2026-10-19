@@ -1,6 +1,8 @@
 import { Command } from "cmdk";
 import { useEffect, useState, type FormEvent } from "react";
 import { Field, Sheet, SwatchDot } from "@/components/mail/bits";
+import { HEADER_MODE_OPTIONS, type HeaderMode } from "@/lib/mail/bot-connection";
+import { fetchBotConnection, pingBotConnection, saveBotConnection } from "@/lib/mail/mail-rpc";
 import { GATE_COPY, knownGateError } from "@/lib/site-gate/messages";
 import { changeSitePassword, logoutSite, sitePasswordEditable } from "@/lib/site-gate/rpc";
 import { toastLabel } from "@/lib/mail/done";
@@ -415,6 +417,108 @@ function SecuritySettings() {
   );
 }
 
+function BotConnection() {
+  const [url, setUrl] = useState("");
+  const [senderKey, setSenderKey] = useState("");
+  const [headerMode, setHeaderMode] = useState<HeaderMode>("bearer");
+  const [keySet, setKeySet] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pingText, setPingText] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void fetchBotConnection()
+      .then((view) => {
+        if (!live) return;
+        setUrl(view.webhookUrl);
+        setHeaderMode(view.headerMode);
+        setKeySet(view.keySet);
+      })
+      .catch(() => {
+        // Leave the fields empty. The key line stays "not set".
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  async function onSave(event: FormEvent) {
+    event.preventDefault();
+    setPending(true);
+    setNotice(null);
+    try {
+      const view = await saveBotConnection({ data: { webhookUrl: url, webhookKey: senderKey, headerMode } });
+      setUrl(view.webhookUrl);
+      setHeaderMode(view.headerMode);
+      setKeySet(view.keySet);
+      setSenderKey("");
+      setNotice("Saved");
+    } catch {
+      setNotice("Could not save");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function onPing() {
+    setPending(true);
+    setPingText(null);
+    try {
+      const result = await pingBotConnection();
+      setPingText(result.status == null ? "No response" : `HTTP ${result.status}`);
+    } catch {
+      setPingText("No response");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold">Grok Bot connection</h3>
+      <form onSubmit={(event) => void onSave(event)} className="space-y-3">
+        <Field label="Webhook URL" value={url} onChange={setUrl} autoComplete="off" />
+        <Field label="Sender key" type="password" value={senderKey} onChange={setSenderKey} autoComplete="off" />
+        <p className="text-base text-muted">{keySet ? "saved" : "not set"}</p>
+        <label className="block text-sm">
+          <span className="mb-1 block text-xs font-medium text-muted">Auth header</span>
+          <select
+            value={headerMode}
+            onChange={(event) => setHeaderMode(event.target.value === "x-webhook-key" ? "x-webhook-key" : "bearer")}
+            className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3 text-base text-ink outline-none"
+          >
+            {HEADER_MODE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="submit"
+            disabled={pending}
+            className="h-11 rounded-full bg-ink px-4 text-base font-semibold text-paper disabled:opacity-40"
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void onPing()}
+            className="h-11 rounded-full bg-ink/5 px-4 text-base font-semibold disabled:opacity-40"
+          >
+            Send test ping
+          </button>
+        </div>
+      </form>
+      {pingText ? <p className="text-base">{pingText}</p> : null}
+      {notice ? <p className="text-base text-muted">{notice}</p> : null}
+    </section>
+  );
+}
+
 function Settings() {
   const setSettingsOpen = useMail((s) => s.setSettings);
   const settings = useMail((s) => s.settings);
@@ -465,6 +569,8 @@ function Settings() {
             </select>
           </label>
         </section>
+
+        <BotConnection />
 
         <section className="space-y-3">
           <h3 className="text-sm font-semibold">Appearance</h3>

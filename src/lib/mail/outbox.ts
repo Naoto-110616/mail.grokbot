@@ -20,7 +20,7 @@ export type OutboxItem = {
 };
 
 export const OUTBOX_WAITING = "Waiting for your OK in Grok Bot";
-export const QUEUED_TOAST = "Queued for approval in Grok Bot";
+export const QUEUED_TOAST = "Sending…";
 
 const POST_STATUSES = new Set<OutboxStatus>(["queued", "awaiting_approval", "sent", "declined", "failed"]);
 
@@ -76,7 +76,8 @@ export function outboxTargetFromSendResult(status: string): OutboxStatus | null 
 }
 
 export function outboxStatusLabel(status: OutboxStatus, error: string | null): string {
-  if (status === "queued" || status === "awaiting_approval") return OUTBOX_WAITING;
+  if (status === "queued") return QUEUED_TOAST;
+  if (status === "awaiting_approval") return OUTBOX_WAITING;
   if (status === "sent") return "Sent";
   if (status === "declined") return "Declined";
   if (status === "cancelled") return "Cancelled";

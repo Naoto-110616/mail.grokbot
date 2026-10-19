@@ -1,6 +1,6 @@
 # Grokbot Mail
 
-Grokbot Mail is a private mailbox for one Grok Bot. The bot delivers mail with `POST /api/ingest`. This app does not speak IMAP or SMTP. Sending a reply wakes the bot, and the message goes out only after the person approves it in Grok Bot.
+Grokbot Mail is a private mailbox for one Grok Bot. The bot delivers mail with `POST /api/ingest`. This app does not speak IMAP or SMTP. Sending wakes the bot with `{ "action": "send", "clientSendId" }`. The message goes out only after the person approves it in Grok Bot.
 
 Each install is its own copy. Nothing is shared between copies.
 
@@ -29,7 +29,9 @@ Use a new Vercel project that you own. The repository does not name a Vercel pro
 
 Give the bot the deployment URL and the same `INGEST_TOKEN`. The bot recipe is `docs/skill/SKILL.md`.
 
-Check-mail and send still wake the bot through a webhook. Put that on the server only, in `data/config.json` (gitignored):
+Check mail still wakes the bot with `{ "action": "sync", "after" }`. Send wakes it with `{ "action": "send", "clientSendId" }` and no message body. Save the webhook in Settings under "Grok Bot connection". That writes `webhookUrl`, `webhookKey`, and the auth header mode on the mailbox config row. The default header is `Authorization: Bearer <key>`. The key is write-only.
+
+`data/config.json` (gitignored) is only a fallback when that row is absent:
 
 ```json
 {
@@ -37,12 +39,12 @@ Check-mail and send still wake the bot through a webhook. Put that on the server
   "displayName": "You",
   "address": "you@example.test",
   "aliases": [],
-  "webhookUrl": "https://example.test/webhook",
+  "webhookUrl": "https://example.com/webhook",
   "webhookKey": "replace-me"
 }
 ```
 
-The browser never receives the webhook URL or the key. An ingest `account` item replaces the address, display name, and aliases when the bot sends one.
+The public config never includes the webhook URL or the key. Settings shows the URL and `saved` or `not set` for the key. An ingest `account` item replaces the address, display name, and aliases when the bot sends one.
 
 ### Self-host
 
@@ -105,7 +107,7 @@ Messages group by `threadHint` first. A missing or empty hint falls back to In-R
 
 **attachment.** Metadata for a file sent apart from the message. Fields: `id`, `messageId`, `filename`, `mime`, `bytes`, `path`, and optional `content` (the same base64 field as on a message attachment). `filename` is required. The path is a relative location. Empty path is metadata with no file. `content` over 1 MiB, or not valid base64, is dropped and the metadata is still stored.
 
-**send-result.** Outcome of a reply. Fields: `clientSendId` (required), `status`, `replyToMessageId`, `sentMessageId`, `error`. `pending` and `waiting` leave the thread on "Waiting for approval in Grok Bot". `failed`, `rejected`, and `error` mark it failed. Any other status, including `sent` and `approved`, marks it sent. Do not post a send-result only because a draft was created. The same item updates the queued send only when `docs/bot-setup.md` allows that transition. The bot can poll `GET /api/outbox?status=queued` instead of waiting for the wake webhook.
+**send-result.** Outcome of a send. Fields: `clientSendId` (required), `status`, `replyToMessageId`, `sentMessageId`, `error`. `pending` and `waiting` leave the thread on "Waiting for approval in Grok Bot". `failed`, `rejected`, and `error` mark it failed. Any other status, including `sent` and `approved`, marks it sent. Do not post a send-result only because a draft was created. The same item updates the queued send only when `docs/bot-setup.md` allows that transition. The wake is `{ "action": "send", "clientSendId" }`. Read the message with `GET /api/outbox?status=queued`.
 
 Example:
 

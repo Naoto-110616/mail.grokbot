@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { Sql } from "../../lib/db.ts";
 import type { Address, Alias, Attachment, Message } from "../../lib/mail/model.ts";
 import { normalizePath } from "../../lib/site-gate/paths.ts";
+import { runDueWakes } from "./wake.server.ts";
 import {
   applySendResults,
   attachmentPathUnsafe,
@@ -472,6 +473,11 @@ export async function handleIngestApi(request: Request, deps: IngestApiDeps = {}
   const method = request.method.toUpperCase();
   const denied = authorize(request, deps);
   if (denied) return denied;
+  try {
+    await runDueWakes(await database(deps));
+  } catch {
+    // A due wake must not fail ingest.
+  }
   if (path !== "/api/ingest" && path !== "/api/ingest/state") return json(404, { error: "not found" });
 
   if (path === "/api/ingest/state") {

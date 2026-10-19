@@ -1,12 +1,42 @@
 # Bot send bridge
 
-The app saves each Send on `mail_outbound`. The bot polls that queue and reports what happened. The wake webhook is optional. When it is not configured, the send stays queued and the app says `Queued for approval in Grok Bot`.
+The app owns outbound delivery. Send stores the message on `mail_outbound` and immediately POSTs a wake to the Grok Bot routine webhook. The wake body is only the send id. The bot reads the message with `GET /api/outbox` and reports what happened. The app does not poll, and it does not run a backup sweep.
+
+When the webhook is not saved, the send stays queued and the app says `Sending…`. A failed wake stays on that same line while retries remain.
 
 Addresses below are examples. Use the mailbox's own addresses.
 
 Send `Authorization: Bearer <INGEST_TOKEN>` on the bot routes. The comparison is the same constant-time check as `POST /api/ingest`. A session cookie does not authorize these routes. A bearer token does not authorize the app's cancel route.
 
 The app does not log the body or the token. Responses send `cache-control: no-store`.
+
+## Grok Bot connection
+
+Settings has a "Grok Bot connection" section: Webhook URL, Sender key, and auth header. Save writes one `mail_mailbox_config` row, id `config`, with `webhookUrl`, `webhookKey`, and `headerMode`. The key is not part of `mail_settings` and it is not on the public config. A read returns the URL, the header mode, and `saved` or `not set`. It does not return the key. A blank key on save keeps the stored key. An empty URL clears delivery.
+
+`data/config.json` is only a fallback when that row is absent. On a deploy, the row is the copy that survives a new instance.
+
+Grok Bot routine webhooks take the key in the `Authorization` header. The default mode is `bearer`, which sends `Authorization: Bearer <key>`. The other mode is `x-webhook-key`, which sends `X-Webhook-Key: <key>` instead. Exactly one of those headers is sent.
+
+"Send test ping" POSTs `{ "action": "ping" }` to the saved URL. The screen shows the HTTP status, or "No response" when there is no status. Ping does not send mail. The bot should answer 200 and do nothing else.
+
+## Wake
+
+On Send the app POSTs immediately:
+
+```json
+{ "action": "send", "clientSendId": "send_1" }
+```
+
+That object has no subject, body, or addresses. `clientSendId` is `mail_outbound.client_send_id`. The bot loads the message with `GET /api/outbox?status=queued` and the ingest token. Check mail still POSTs `{ "action": "sync", "after" }`.
+
+HTTP 200 means the routine woke. The row stays `queued` until the bot reports a status. It does not mean the message was sent.
+
+## Retries
+
+A wake that does not return HTTP 200 is retried. The delay before each of the five attempts is immediate, 30 seconds, 2 minutes, 10 minutes, then 1 hour. The fifth failure sets `status` to `failed`. `mail_outbound` stores `attempt_count`, `next_attempt_at`, and `last_error`.
+
+There is no Vercel cron. A Hobby cron runs at most once per day, and a sub-daily schedule fails at deploy, so a cron cannot fire a 30-second, 2-minute, or 10-minute retry. A due row runs on the next app request that loads the mailbox, and on the next authorized ingest or outbox request, after `next_attempt_at`. Until that request arrives, nothing else posts the wake. Each request posts at most 5 due wakes. Each POST times out at 8 seconds.
 
 ## Status codes
 
@@ -43,12 +73,12 @@ Each item has exactly these fields:
 }
 ```
 
-- `id` is `mail_outbound.client_send_id`. It is the same id as `clientSendId` on the wake webhook.
+- `id` is `mail_outbound.client_send_id`. It is the same id as `clientSendId` on the wake.
 - `fromAddress`, `to`, and `cc` are email strings.
 - `text` is the plain body stored with the send.
 - `html` is a string only when the stored send has one. Compose leaves it `null`.
 - `replyTo` is `null` when the send is not a reply. `ingestId` is the `mail_message.id` of the message being answered, not its RFC Message-ID. `subject` is that row's subject, or `""` when the row is gone.
-- `bcc` is never a field. A blind copy typed in Compose is dropped and is not in this payload. The wake webhook sends `bcc` as `[]`.
+- `bcc` is never a field. A blind copy typed in Compose is dropped and is not in this payload. The wake body has no `bcc` field either.
 
 ## `POST /api/outbox/:id/status`
 
@@ -148,19 +178,20 @@ The transition table above still applies. `queued` → `sent` is rejected. `awai
 
 ## What the app shows
 
-Compose Send keeps writing `mail_outbound`. The wake POST still runs when a webhook is configured. When it is not, there is no "did not wake" failure. The toast is `Queued for approval in Grok Bot`.
+Compose Send writes `mail_outbound` and POSTs the wake when a webhook is saved. The toast is `Sending…`. The screen does not say that the bot did not wake, and it does not say that a message was not sent.
 
 The Outbox folder lists saved sends whose message is still in the mailbox. Delete forever removes the matching `mail_outbound` row. A row whose message is already gone is not listed. The drawer count is how many listed rows are `queued` or `awaiting_approval` (`waiting` and `pending` count as queued).
 
 | Stored status | Label |
 | --- | --- |
-| `queued`, `waiting`, `pending`, `awaiting_approval` | `Waiting for your OK in Grok Bot` |
+| `queued`, `waiting`, `pending` | `Sending…` |
+| `awaiting_approval` | `Waiting for your OK in Grok Bot` |
 | `sent` | `Sent` |
 | `declined` | `Declined` |
-| `failed` | `Failed: <error>`, or `Failed` when the error is blank |
+| `failed` | `Failed: <error>`, or `Failed` when the error is blank. Retry is shown only here. |
 | `cancelled` | `Cancelled` |
 
-Cancel is shown only for `queued` (including a stored `waiting` or `pending` row). It calls `DELETE /api/outbox/:id`.
+`failed` is the row after the five wakes are used, or after the bot reports `failed`. Retry sets the row back to `queued` and POSTs the wake again. Cancel is shown only for `queued` (including a stored `waiting` or `pending` row). It calls `DELETE /api/outbox/:id`.
 
 ## Attachment `content` on ingest
 

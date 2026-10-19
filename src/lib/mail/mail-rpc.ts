@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { AttachmentBody } from "@/lib/mail/backend";
+import type { HeaderMode } from "@/lib/mail/bot-connection";
 import type { ActKind, Attachment, Draft, MailData } from "@/lib/mail/model";
 import type { SendRequest } from "@/lib/mail/backend";
 import { demoPublicConfig, type PublicMailConfig } from "@/lib/mail/public-config";
@@ -12,6 +13,45 @@ export const fetchPublicMailConfig = createServerFn({ method: "GET" }).handler(a
   const { publicMailConfig } = await import("@/server/mail/config.server");
   return publicMailConfig();
 });
+
+function connectionInput(input: unknown): { webhookUrl: string; webhookKey: string; headerMode: HeaderMode } {
+  const row = input && typeof input === "object" ? (input as { webhookUrl?: unknown; webhookKey?: unknown; headerMode?: unknown }) : {};
+  return {
+    webhookUrl: typeof row.webhookUrl === "string" ? row.webhookUrl : "",
+    webhookKey: typeof row.webhookKey === "string" ? row.webhookKey : "",
+    headerMode: row.headerMode === "x-webhook-key" ? "x-webhook-key" : "bearer",
+  };
+}
+
+/** URL, header mode, and whether a key is saved. The key itself is not returned. */
+export const fetchBotConnection = createServerFn({ method: "GET" }).handler(async () => {
+  const { readBotConnection } = await import("@/server/mail/config.server");
+  return readBotConnection();
+});
+
+export const saveBotConnection = createServerFn({ method: "POST" })
+  .validator(connectionInput)
+  .handler(async ({ data }) => {
+    const { saveBotConnection: save } = await import("@/server/mail/config.server");
+    return save(data);
+  });
+
+export const pingBotConnection = createServerFn({ method: "POST" }).handler(async (): Promise<{ status: number | null }> => {
+  const { pingBot } = await import("@/server/mail/bridge.server");
+  return pingBot();
+});
+
+export const retryOutboxSend = createServerFn({ method: "POST" })
+  .validator((input: unknown) => {
+    const row = input as { data?: unknown; id?: unknown };
+    const id = typeof row?.id === "string" ? row.id : "";
+    if (!id) throw new Error("invalid mail data");
+    return { data: asMail(row?.data), id };
+  })
+  .handler(async ({ data }): Promise<MailData> => {
+    const { retryMailboxSend } = await import("@/server/mail/store.server");
+    return retryMailboxSend(data.data, data.id);
+  });
 
 function asMail(input: unknown): MailData {
   if (!input || typeof input !== "object" || !Array.isArray((input as MailData).threads)) {

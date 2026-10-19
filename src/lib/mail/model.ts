@@ -430,12 +430,6 @@ export function activityIso(t: Thread): string {
 export const WAITING_COPY = "Waiting for approval in Grok Bot";
 export { QUEUED_TOAST, OUTBOX_WAITING } from "./outbox.ts";
 
-/** Wake POST failed. New mail and forwards say "message"; only a reply says "reply". */
-export function wakeMissNotice(mode: DraftMode): string {
-  const noun = mode === "reply" || mode === "replyAll" ? "reply" : "message";
-  return `Grok Bot did not wake. This ${noun} was not sent.`;
-}
-
 export function snippetOf(t: Thread): string {
   const last = [...t.messages].reverse()[0];
   if (last?.delivery === "waiting") return WAITING_COPY;

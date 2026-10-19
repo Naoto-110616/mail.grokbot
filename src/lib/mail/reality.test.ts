@@ -13,9 +13,9 @@ import {
   savedDraftThreadId,
   settingsFromUnknown,
   shouldPersistDraft,
-  wakeMissNotice,
   type Thread,
 } from "./model.ts";
+import { OUTBOX_WAITING, QUEUED_TOAST, outboxStatusLabel } from "./outbox.ts";
 import { linkedThreadState, threadIsHidden } from "./thread-place.ts";
 
 const SIGNATURE = "You\nyou@example.com";
@@ -156,11 +156,18 @@ describe("settings and wake copy", () => {
     assert.equal(hydrateDisplaySettings({ theme: "dark" }, local).theme, "lights-out");
   });
 
-  it("says message for new mail and reply only for a reply", () => {
-    assert.equal(wakeMissNotice("new"), "Grok Bot did not wake. This message was not sent.");
-    assert.equal(wakeMissNotice("forward"), "Grok Bot did not wake. This message was not sent.");
-    assert.equal(wakeMissNotice("reply"), "Grok Bot did not wake. This reply was not sent.");
-    assert.equal(wakeMissNotice("replyAll"), "Grok Bot did not wake. This reply was not sent.");
+  it("shows Sending while queued and the waiting line only for approval", () => {
+    assert.equal(QUEUED_TOAST, "Sending…");
+    assert.equal(outboxStatusLabel("queued", null), "Sending…");
+    assert.equal(outboxStatusLabel("awaiting_approval", null), OUTBOX_WAITING);
+    assert.equal(outboxStatusLabel("sent", null), "Sent");
+    assert.equal(outboxStatusLabel("failed", "HTTP 503"), "Failed: HTTP 503");
+    assert.equal(outboxStatusLabel("failed", "  "), "Failed");
+    for (const line of [QUEUED_TOAST, OUTBOX_WAITING, outboxStatusLabel("failed", "HTTP 503")]) {
+      assert.equal(line.includes("did not wake"), false);
+      assert.equal(line.includes("not sent"), false);
+      assert.equal(line.toLowerCase().includes("reply"), false);
+    }
   });
 });
 
@@ -256,6 +263,8 @@ describe("reality wiring", () => {
     const compose = readFileSync(new URL("../../components/mail/compose.tsx", import.meta.url), "utf8");
     const css = readFileSync(new URL("../../styles.css", import.meta.url), "utf8");
     const outboundDelete = readFileSync(new URL("../../server/mail/outbound-delete.ts", import.meta.url), "utf8");
+    const overlays = readFileSync(new URL("../../components/mail/overlays.tsx", import.meta.url), "utf8");
+    const connection = readFileSync(new URL("./bot-connection.ts", import.meta.url), "utf8");
 
     assert.match(server, /mail_settings/);
     assert.match(server, /hydrateDisplaySettings/);
@@ -264,7 +273,11 @@ describe("reality wiring", () => {
     assert.match(server, /!overlay\.settingsPresent/);
     assert.equal(server.includes("settingsFromUnknown"), false);
     assert.match(server, /withSignature\(request\.body/);
-    assert.match(server, /wakeMissNotice\(signed\.mode\)/);
+    assert.match(server, /sendWake\(clientSendId\)/);
+    assert.equal(server.includes("wakeMissNotice"), false);
+    assert.equal(server.includes("replyWebhook"), false);
+    assert.equal(server.includes("did not wake"), false);
+    assert.equal(server.includes("not sent"), false);
     assert.match(server, /linkedThreadState/);
     assert.match(server, /applyFilters/);
     assert.match(server, /applySenderRules/);
@@ -322,6 +335,19 @@ describe("reality wiring", () => {
     assert.match(list, /Delete forever/);
     assert.match(list, /destroyForever/);
     assert.match(list, /bg-paper/);
+    assert.match(list, /Retry/);
+    assert.match(list, /item\.status === "failed"/);
+    assert.match(store, /retryOutbox/);
+
+    assert.match(overlays, /Grok Bot connection/);
+    assert.match(overlays, /Send test ping/);
+    assert.match(overlays, /HEADER_MODE_OPTIONS/);
+    assert.match(overlays, /keySet \? "saved" : "not set"/);
+    assert.match(connection, /Authorization: Bearer <key>/);
+    assert.match(connection, /X-Webhook-Key: <key>/);
+    assert.equal(overlays.includes("view.webhookKey"), false);
+    assert.equal(/setSenderKey\(view/.test(overlays), false);
+    assert.match(overlays, /text-base/);
 
     assert.match(compose, /autosaveCompose/);
     assert.match(compose, /700/);

@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { getActiveBackend, setActiveBackend } from "@/lib/mail/active-backend";
 import { demoFromAddress, demoMine, plusFallback } from "@/lib/mail/adapters/local-demo";
 import type { AttachmentBody, BackendId, SendRequest } from "@/lib/mail/backend";
-import { fetchPublicMailConfig } from "@/lib/mail/mail-rpc";
+import { fetchPublicMailConfig, retryOutboxSend } from "@/lib/mail/mail-rpc";
 import { needsBulkConfirm } from "@/lib/mail/batch";
 import { applySenderRules, upsertSenderRule } from "@/lib/mail/bundles";
 import { acceptStoredSenders, applyGate, blockDomain, decideSenders as decideSenderBook, gateBookOf, migrateSavedGate, type GateMode } from "@/lib/mail/gate";
@@ -142,6 +142,7 @@ type State = MailData &
     removeComposeFile: (id: string) => void;
     send: () => void;
     cancelOutbox: (id: string) => void;
+    retryOutbox: (id: string) => void;
     sendQuick: (threadId: string, replyId: string, mode: "reply" | "replyAll") => void;
     dismissCompose: () => void;
     addFilter: (filter: Omit<Filter, "id">) => void;
@@ -682,6 +683,19 @@ export const useMail = create<State>()(
             }
             const incoming = await getActiveBackend().bootstrap(dataOf(get()));
             commit(incoming, { toast: { text: "Cancelled", snapshot: null } });
+          });
+        },
+
+        retryOutbox: (id) => {
+          const snapshot = snapshotOf(dataOf(get()));
+          set({ toast: { text: QUEUED_TOAST, snapshot } });
+          void enqueue(async () => {
+            try {
+              const incoming = await retryOutboxSend({ data: { data: dataOf(get()), id } });
+              commit(incoming, { toast: { text: QUEUED_TOAST, snapshot } });
+            } catch {
+              set({ toast: { text: "Could not retry that send", snapshot: null } });
+            }
           });
         },
 

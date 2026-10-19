@@ -14,6 +14,7 @@ const threadHintMigration = readFileSync(new URL("../../../migrations/0005_mail_
 const directionMigration = readFileSync(new URL("../../../migrations/0006_mail_direction.sql", import.meta.url), "utf8");
 const outboundBridgeMigration = readFileSync(new URL("../../../migrations/0008_mail_outbound_bridge.sql", import.meta.url), "utf8");
 const attachmentContentMigration = readFileSync(new URL("../../../migrations/0009_mail_attachment_content.sql", import.meta.url), "utf8");
+const mailboxConfigMigration = readFileSync(new URL("../../../migrations/0010_mail_mailbox_config.sql", import.meta.url), "utf8");
 
 function wrap(pg: PGlite): Sql {
   const run = async <T>(text: string, params: unknown[]): Promise<T[]> => {
@@ -36,6 +37,7 @@ async function applyIngestSchema(pg: PGlite): Promise<void> {
   await pg.exec(directionMigration);
   await pg.exec(outboundBridgeMigration);
   await pg.exec(attachmentContentMigration);
+  await pg.exec(mailboxConfigMigration);
 }
 
 async function database(): Promise<{ sql: Sql; close: () => Promise<void> }> {

@@ -71,6 +71,7 @@ export function ThreadList({
   const setListedIds = useMail((s) => s.setListedIds);
   const outbox = useMail((s) => s.outbox ?? []);
   const cancelOutbox = useMail((s) => s.cancelOutbox);
+  const retryOutbox = useMail((s) => s.retryOutbox);
   const destroyForever = useMail((s) => s.destroyForever);
   const [foreverId, setForeverId] = useState<string | null>(null);
   const showChecks = selecting || checked.length > 0;
@@ -136,7 +137,7 @@ export function ThreadList({
   const showStrip = folder === "inbox" && !query && !gateList && gate.mode === "before" && senderCards.length > 0;
 
   if (folder === "outbox") {
-    return <OutboxList items={outbox} onCancel={cancelOutbox} onCheck={checkMail} />;
+    return <OutboxList items={outbox} onCancel={cancelOutbox} onRetry={retryOutbox} onCheck={checkMail} />;
   }
 
   return (
@@ -663,10 +664,12 @@ function byNewest(a: OutboxItem, b: OutboxItem): number {
 function OutboxList({
   items,
   onCancel,
+  onRetry,
   onCheck,
 }: {
   items: OutboxItem[];
   onCancel: (id: string) => void;
+  onRetry: (id: string) => void;
   onCheck: () => void;
 }) {
   const rows = [...items].sort(byNewest);
@@ -712,6 +715,15 @@ function OutboxList({
                       onClick={() => onCancel(item.id)}
                     >
                       Cancel
+                    </button>
+                  ) : null}
+                  {item.status === "failed" ? (
+                    <button
+                      type="button"
+                      className="mt-2 h-11 rounded-full bg-ink/5 px-3 text-base font-semibold"
+                      onClick={() => onRetry(item.id)}
+                    >
+                      Retry
                     </button>
                   ) : null}
                 </li>

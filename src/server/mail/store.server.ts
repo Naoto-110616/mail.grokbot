@@ -23,7 +23,6 @@ import {
   hydrateDisplaySettings,
   signatureFor,
   uid,
-  wakeMissNotice,
   withSignature,
 } from "@/lib/mail/model";
 import { applySenderRules } from "@/lib/mail/bundles";
@@ -31,8 +30,9 @@ import { reopenDoneThread } from "@/lib/mail/done";
 import { canonicalOutboxStatus, outboxItemsForThreads, type OutboxItem } from "@/lib/mail/outbox";
 import { deleteOutboundForMailbox } from "./outbound-delete.ts";
 import { linkedThreadState, threadIsHidden } from "@/lib/mail/thread-place";
-import { replyWebhook, syncWebhook } from "@/lib/mail/webhook-body";
+import { sendWake, syncWebhook } from "@/lib/mail/webhook-body";
 import { deliverConfigured } from "./bridge.server.ts";
+import { armWake, recordWakeResult, requeueFailedSend, runDueWakes } from "./wake.server.ts";
 import { loadMailConfig, type LoadedConfig } from "./config.server.ts";
 import { loadStoredIngest } from "./ingest-api.server.ts";
 import {
@@ -365,6 +365,12 @@ async function writeSettings(settings: Settings): Promise<void> {
 }
 
 export async function loadBridgeMailbox(current: MailData | null, root = process.cwd()): Promise<MailData> {
+  try {
+    const sql = await sqlOrNull();
+    if (sql) await runDueWakes(sql, root);
+  } catch {
+    // A due wake must not block the mailbox.
+  }
   const config = await loadMailConfig(root);
   let ingest;
   try {
@@ -663,23 +669,38 @@ export async function sendMailbox(data: MailData, request: SendRequest, root = p
   const next = withOutboxItem(insertOutgoing(current, signed, message), signed, clientSendId);
   await persistMailbox(next);
   await stampOutbound(clientSendId, signed.replyToId, signed.threadId);
-  const woke = await deliverConfigured(
-    replyWebhook({
-      clientSendId,
-      from: message.from.email,
-      to: signed.to.map((address) => address.email),
-      cc: signed.cc.map((address) => address.email),
-      bcc: [],
-      subject: signed.subject,
-      text: signed.body,
-      replyToMessageId: signed.replyToMessageId,
-      threadId: signed.threadId,
-      attachments: signed.attachments,
-    }),
-    root,
-  );
-  if (!woke.ok && woke.error !== "unconfigured") {
-    return { data: next, notice: wakeMissNotice(signed.mode), delivery: "waiting" as const };
+  const sql = await sqlOrNull();
+  if (sql) {
+    try {
+      await armWake(sql, clientSendId);
+    } catch {
+      // The POST below still runs. A later request retries only once a time is stored.
+    }
+  }
+  const woke = await deliverConfigured(sendWake(clientSendId), root);
+  if (sql) {
+    try {
+      await recordWakeResult(sql, clientSendId, woke);
+    } catch {
+      // The lease from armWake expires, and the next request can post again.
+    }
   }
   return { data: next, notice: QUEUED_TOAST, delivery: "waiting" as const };
+}
+
+export async function retryMailboxSend(data: MailData, clientSendId: string, root = process.cwd()): Promise<MailData> {
+  const current = assertMail(data);
+  const sql = await sqlOrNull();
+  if (sql && clientSendId) {
+    try {
+      const queued = await requeueFailedSend(sql, clientSendId);
+      if (queued) {
+        const woke = await deliverConfigured(sendWake(clientSendId), root);
+        await recordWakeResult(sql, clientSendId, woke);
+      }
+    } catch {
+      // The reload still shows the row.
+    }
+  }
+  return loadBridgeMailbox(current, root);
 }
