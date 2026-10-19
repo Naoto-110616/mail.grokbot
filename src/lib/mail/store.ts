@@ -23,7 +23,7 @@ import {
   type Swatch,
   type Thread,
   SWATCHES,
-  WAITING_COPY,
+  QUEUED_TOAST,
   accountOf,
   activityIso,
   applyAct,
@@ -137,6 +137,7 @@ type State = MailData &
     addComposeFiles: (attachments: Attachment[]) => void;
     removeComposeFile: (id: string) => void;
     send: () => void;
+    cancelOutbox: (id: string) => void;
     sendQuick: (threadId: string, replyId: string, mode: "reply" | "replyAll") => void;
     dismissCompose: () => void;
     addFilter: (filter: Omit<Filter, "id">) => void;
@@ -190,6 +191,7 @@ function dataOf(s: MailData): MailData {
     demoCursor: s.demoCursor,
     gmail: s.gmail,
     hiddenThreadIds: s.hiddenThreadIds ?? [],
+    outbox: s.outbox ?? [],
   };
 }
 
@@ -197,7 +199,7 @@ function sliceOf(data: MailData) {
   return dataOf(data);
 }
 
-function blankCompose(from: string, signature: string): ComposeModel {
+function blankCompose(from: string, _signature: string): ComposeModel {
   return {
     mode: "new",
     threadId: null,
@@ -210,7 +212,7 @@ function blankCompose(from: string, signature: string): ComposeModel {
     showCc: false,
     showBcc: false,
     subject: "",
-    body: withSignature("\n", signature),
+    body: "",
     attachments: [],
     minimized: false,
     expanded: false,
@@ -627,7 +629,7 @@ export const useMail = create<State>()(
             cc: parseAddressList(compose.cc),
             bcc: parseAddressList(compose.bcc),
             subject: compose.subject.trim() || "(no subject)",
-            body: compose.body,
+            body: withSignature(compose.body, s.settings.signature),
             attachments: compose.attachments,
             replyToId: compose.replyToId,
             replyToMessageId: reply?.messageId ?? null,
@@ -642,11 +644,30 @@ export const useMail = create<State>()(
           }
           set({
             compose: null,
-            toast: { text: s.backendId === "bot-bridge" ? WAITING_COPY : "Message sent", snapshot },
+            toast: { text: s.backendId === "bot-bridge" ? QUEUED_TOAST : "Message sent", snapshot },
           });
           void enqueue(async () => {
             const result = await getActiveBackend().send(dataOf(get()), request);
             commit(result.data, { toast: { text: result.notice, snapshot } });
+          });
+        },
+
+        cancelOutbox: (id) => {
+          void enqueue(async () => {
+            const response = await fetch(`/api/outbox/${encodeURIComponent(id)}`, {
+              method: "DELETE",
+              credentials: "same-origin",
+            });
+            if (response.status === 409) {
+              set({ toast: { text: "That send can no longer be cancelled", snapshot: null } });
+              return;
+            }
+            if (!response.ok) {
+              set({ toast: { text: "Could not cancel that send", snapshot: null } });
+              return;
+            }
+            const incoming = await getActiveBackend().bootstrap(dataOf(get()));
+            commit(incoming, { toast: { text: "Cancelled", snapshot: null } });
           });
         },
 
@@ -670,7 +691,7 @@ export const useMail = create<State>()(
             return;
           }
           const snapshot = snapshotOf(dataOf(s));
-          set({ toast: { text: "Sent for approval", snapshot } });
+          set({ toast: { text: QUEUED_TOAST, snapshot } });
           void enqueue(async () => {
             const result = await getActiveBackend().send(dataOf(get()), request);
             commit(result.data, { toast: { text: result.notice, snapshot } });

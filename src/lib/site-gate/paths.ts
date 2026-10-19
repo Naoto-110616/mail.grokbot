@@ -16,6 +16,12 @@ export function isIngestApiPath(pathname: string): boolean {
   return path === "/api/ingest" || path.startsWith("/api/ingest/");
 }
 
+/** Bot queue and the app cancel route. Auth is enforced inside the handler. */
+export function isOutboxApiPath(pathname: string): boolean {
+  const path = normalizePath(pathname);
+  return path === "/api/outbox" || path.startsWith("/api/outbox/");
+}
+
 /**
  * Static files, and the Vite module graph while developing.
  * Production stays narrow so an unknown path cannot fall through to the app.

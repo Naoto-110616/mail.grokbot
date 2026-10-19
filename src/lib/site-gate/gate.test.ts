@@ -680,4 +680,54 @@ describe("site gate without a database", () => {
     assert.equal(other?.status, 302);
     assert.equal(pgliteStarted(), false);
   });
+
+  it("answers /api/outbox with JSON and does not redirect to login", async () => {
+    delete process.env.DATABASE_URL;
+    delete process.env.INGEST_TOKEN;
+    assert.equal(pgliteStarted(), false);
+    const queued = await handleSiteRequest({
+      request: new Request("https://mail.example/api/outbox?status=queued", {
+        method: "GET",
+        headers: { cookie: "gb_session=not-a-session" },
+      }),
+      pathname: "/api/outbox",
+      handlerType: "router",
+    });
+    assert.equal(queued?.status, 503);
+    assert.match(queued?.headers.get("content-type") ?? "", /json/);
+    assert.equal(queued?.headers.get("location"), null);
+    assert.deepEqual(await queued?.json(), { error: "unavailable" });
+    assert.equal(pgliteStarted(), false);
+
+    process.env.INGEST_TOKEN = "bridge-test-token";
+    const denied = await handleSiteRequest({
+      request: new Request("https://mail.example/api/outbox/send_1/status", {
+        method: "POST",
+        headers: {
+          cookie: "gb_session=not-a-session",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ status: "awaiting_approval" }),
+      }),
+      pathname: "/api/outbox/send_1/status",
+      handlerType: "router",
+    });
+    assert.equal(denied?.status, 401);
+    assert.equal(denied?.headers.get("location"), null);
+    assert.deepEqual(await denied?.json(), { error: "unauthorized" });
+    assert.equal(pgliteStarted(), false);
+
+    const cancel = await handleSiteRequest({
+      request: new Request("https://mail.example/api/outbox/send_1", {
+        method: "DELETE",
+        headers: { authorization: "Bearer bridge-test-token" },
+      }),
+      pathname: "/api/outbox/send_1",
+      handlerType: "router",
+    });
+    assert.equal(cancel?.status, 401);
+    assert.equal(cancel?.headers.get("location"), null);
+    assert.deepEqual(await cancel?.json(), { error: "unauthorized" });
+    assert.equal(pgliteStarted(), false);
+  });
 });

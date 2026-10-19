@@ -7,7 +7,7 @@ import {
   type GateDeps,
 } from "./gate.ts";
 import { requestLocalhostGateOpen } from "./localhost-gate.ts";
-import { isIngestApiPath } from "./paths.ts";
+import { isIngestApiPath, isOutboxApiPath } from "./paths.ts";
 import { loadSecurity, savePasswordHash } from "./store.server.ts";
 
 const rateLimit = createRateLimiter();
@@ -33,6 +33,10 @@ export async function handleSiteRequest(input: {
     if (input.handlerType !== "serverFn" && isIngestApiPath(input.pathname)) {
       const { handleIngestApi } = await import("../../server/mail/ingest-api.server.ts");
       return await handleIngestApi(input.request);
+    }
+    if (input.handlerType !== "serverFn" && isOutboxApiPath(input.pathname)) {
+      const { handleOutboxApi } = await import("../../server/mail/outbox-api.server.ts");
+      return await handleOutboxApi(input.request);
     }
     // Dev loopback only. NODE_ENV=production never takes this branch.
     if (requestLocalhostGateOpen(input.request)) return null;

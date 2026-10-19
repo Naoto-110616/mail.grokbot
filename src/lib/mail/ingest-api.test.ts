@@ -12,6 +12,7 @@ const migration = readFileSync(new URL("../../../migrations/0004_mail_ingest.sql
 const productMigration = readFileSync(new URL("../../../migrations/0002_mail.sql", import.meta.url), "utf8");
 const threadHintMigration = readFileSync(new URL("../../../migrations/0005_mail_thread_hint.sql", import.meta.url), "utf8");
 const directionMigration = readFileSync(new URL("../../../migrations/0006_mail_direction.sql", import.meta.url), "utf8");
+const outboundBridgeMigration = readFileSync(new URL("../../../migrations/0008_mail_outbound_bridge.sql", import.meta.url), "utf8");
 
 function wrap(pg: PGlite): Sql {
   const run = async <T>(text: string, params: unknown[]): Promise<T[]> => {
@@ -28,9 +29,11 @@ function wrap(pg: PGlite): Sql {
 }
 
 async function applyIngestSchema(pg: PGlite): Promise<void> {
+  await pg.exec(productMigration);
   await pg.exec(migration);
   await pg.exec(threadHintMigration);
   await pg.exec(directionMigration);
+  await pg.exec(outboundBridgeMigration);
 }
 
 async function database(): Promise<{ sql: Sql; close: () => Promise<void> }> {

@@ -82,8 +82,10 @@ function asAttachment(value: unknown): Attachment | null {
 
 export function deliveryForStatus(status: string): "waiting" | "sent" | "failed" {
   const value = status.trim().toLowerCase();
-  if (value === "pending" || value === "waiting") return "waiting";
-  if (value === "failed" || value === "rejected" || value === "error") return "failed";
+  if (value === "pending" || value === "waiting" || value === "queued" || value === "awaiting_approval") return "waiting";
+  if (value === "failed" || value === "rejected" || value === "error" || value === "declined" || value === "cancelled") {
+    return "failed";
+  }
   return "sent";
 }
 

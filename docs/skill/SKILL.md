@@ -47,9 +47,19 @@ The body looks like:
 
 1. Check `action` is `reply`, `from` is an alias of this inbox, and the addresses are addresses.
 2. Call `DraftExternalMessage` with `providerIdentifier` `grok-bot-agent-inbox`, `from` set to that alias, and `replyToMessageId` set to the value in the body.
-3. Do not POST a send-result when the draft is only created. The Mail app stays on "Waiting for approval in Grok Bot" until the outcome is known.
-4. When the person approves or the draft fails, POST a `send-result` item whose `clientSendId` matches the body. Use `sent` or `approved` when it went out, and include `sentMessageId`. Use `failed`, `rejected`, or `error` when it did not. `pending` or `waiting` leaves the app waiting.
-5. On a later `sync`, POST the sent message as a normal `message` item so the thread has the real headers.
+3. Do not POST a send-result when the draft is only created. The row starts as `queued`. Move it to `awaiting_approval` when the draft is waiting on the person (`POST /api/outbox/<clientSendId>/status`, or a send-result with status `awaiting_approval`). Until that outcome is known, the Mail app stays on "Waiting for approval in Grok Bot".
+4. When the person approves or the draft fails, move that row from `awaiting_approval`. Use `sent` with `providerMessageId` on the status route, or a send-result with `sent` or `approved` and `sentMessageId`. Use `failed`, `rejected`, or `error` when it did not go out. `pending` or `waiting` leaves the app waiting. `queued` → `sent` is not applied.
+5. On a later `sync`, POST the sent message as a normal `message` item so the thread has the real headers. Use the id `msg_<providerMessageId>` so the app updates the copy it already stored.
+
+## Outbox
+
+The wake webhook is optional. When it is unset, the send is still queued.
+
+Poll `GET /api/outbox?status=queued` with `Authorization: Bearer` and the same `INGEST_TOKEN`. Report the outcome with `POST /api/outbox/<id>/status`. Statuses, JSON shapes, transitions, and the sent-message id are in `docs/bot-setup.md`.
+
+`bcc` is not in that payload. Do not add a blind copy.
+
+A `send-result` item uses those same transition rules for the queued send. Posting the sent message later updates it and does not create a second copy.
 
 ## Refuse
 

@@ -527,20 +527,6 @@ function Settings() {
               className="w-full"
             />
           </label>
-          <label className="block text-sm">
-            <span className="mb-1 block text-xs font-medium text-muted">Undo send</span>
-            <select
-              value={settings.undoSeconds}
-              onChange={(e) => update({ undoSeconds: Number(e.target.value) })}
-              className="h-11 w-full rounded-xl border border-line bg-paper-2 px-3 text-sm"
-            >
-              {[5, 8, 15, 30].map((n) => (
-                <option key={n} value={n}>
-                  {n} seconds
-                </option>
-              ))}
-            </select>
-          </label>
         </section>
 
         <SiteAddress />

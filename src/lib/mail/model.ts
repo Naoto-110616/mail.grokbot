@@ -11,6 +11,7 @@ import {
   savedSearchesOf,
   type SavedSearch,
 } from "./search.ts";
+import type { OutboxItem } from "./outbox.ts";
 import { defaultSwipePrefs, type SwipePrefs } from "./swipe.ts";
 
 /** Placeholder address until an ingest account or config.json sets one. */
@@ -154,7 +155,8 @@ export type SystemFolder =
   | "trash"
   | "all"
   | "done"
-  | "blocked";
+  | "blocked"
+  | "outbox";
 
 export type FolderId = SystemFolder | `label:${string}` | `plus:${string}`;
 
@@ -170,6 +172,8 @@ export type MailData = {
   demoCursor: number;
   gmail: GmailChoice;
   hiddenThreadIds?: string[];
+  /** Sends waiting on the bot, loaded from mail_outbound. */
+  outbox?: OutboxItem[];
 };
 
 export const SWATCHES: Swatch[] = ["teal", "ink", "brass", "olive", "rose"];
@@ -331,6 +335,7 @@ export function activityIso(t: Thread): string {
 }
 
 export const WAITING_COPY = "Waiting for approval in Grok Bot";
+export { QUEUED_TOAST, OUTBOX_WAITING } from "./outbox.ts";
 
 export function snippetOf(t: Thread): string {
   const last = [...t.messages].reverse()[0];
@@ -400,6 +405,7 @@ export function isDone(t: Thread): boolean {
 }
 
 export function inFolder(t: Thread, folder: FolderId, now: number, mine: Set<string>): boolean {
+  if (folder === "outbox") return false;
   const trash = t.location === "trash";
   const spam = t.location === "spam";
   if (folder === "trash") return trash;
@@ -854,6 +860,7 @@ export function folderLabel(folder: FolderId, labels: Label[]): string {
     all: "All mail",
     done: "Done",
     blocked: "Blocked",
+    outbox: "Outbox",
   };
   if (folder.startsWith("label:")) {
     return labels.find((l) => l.id === folder.slice(6))?.name ?? "Label";

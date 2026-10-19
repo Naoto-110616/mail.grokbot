@@ -217,7 +217,8 @@ describe("quick replies", () => {
     const quick = store.slice(quickStart, quickEnd);
     assert.ok(quickStart > 0);
     assert.match(quick, /getActiveBackend\(\)\.send/);
-    assert.match(quick, /Sent for approval/);
+    assert.match(quick, /QUEUED_TOAST/);
+    assert.equal(quick.includes("Sent for approval"), false);
     assert.match(quick, /plusFallback\(s, thread\.plusTag, s\.account\)/);
     assert.equal(quick.includes("smtp"), false);
     assert.equal(store.includes("smtp"), false);

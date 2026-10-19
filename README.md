@@ -61,7 +61,7 @@ npm run dev
 
 ## Ingest API
 
-Full item shapes and the bot recipe also live in `docs/INGEST.md` and `docs/skill/SKILL.md`.
+Full item shapes and the bot recipe also live in `docs/INGEST.md`, `docs/bot-setup.md`, and `docs/skill/SKILL.md`.
 
 `POST /api/ingest` and `GET /api/ingest/state` expect:
 
@@ -105,7 +105,7 @@ Messages group by `threadHint` first. A missing or empty hint falls back to In-R
 
 **attachment.** Metadata for a file sent apart from the message. Fields: `id`, `messageId`, `filename`, `mime`, `bytes`, `path`. `filename` is required. The path is a relative location the bot keeps.
 
-**send-result.** Outcome of a reply. Fields: `clientSendId` (required), `status`, `replyToMessageId`, `sentMessageId`, `error`. `pending` and `waiting` leave the thread on "Waiting for approval in Grok Bot". `failed`, `rejected`, and `error` mark it failed. Any other status, including `sent` and `approved`, marks it sent. Do not post a send-result only because a draft was created.
+**send-result.** Outcome of a reply. Fields: `clientSendId` (required), `status`, `replyToMessageId`, `sentMessageId`, `error`. `pending` and `waiting` leave the thread on "Waiting for approval in Grok Bot". `failed`, `rejected`, and `error` mark it failed. Any other status, including `sent` and `approved`, marks it sent. Do not post a send-result only because a draft was created. The same item updates the queued send only when `docs/bot-setup.md` allows that transition. The bot can poll `GET /api/outbox?status=queued` instead of waiting for the wake webhook.
 
 Example:
 

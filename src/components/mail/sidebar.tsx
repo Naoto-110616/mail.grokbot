@@ -9,6 +9,7 @@ import {
   OctagonAlert,
   Ban,
   PenLine,
+  Mailbox,
   Send,
   Settings,
   Star,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { addressLocal, folderLabel, type FolderId, unreadIn, visibleThreads } from "@/lib/mail/model";
+import { outboxBadgeCount } from "@/lib/mail/outbox";
 import { savedSearchesOf } from "@/lib/mail/search";
 import { useMail } from "@/lib/mail/store";
 import { SwatchDot } from "@/components/mail/bits";
@@ -27,6 +29,7 @@ const FOLDERS: { id: FolderId; icon: typeof Inbox }[] = [
   { id: "snoozed", icon: Clock },
   { id: "important", icon: Bookmark },
   { id: "sent", icon: Send },
+  { id: "outbox", icon: Mailbox },
   { id: "drafts", icon: FileEdit },
   { id: "all", icon: Archive },
   { id: "spam", icon: OctagonAlert },
@@ -48,6 +51,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const account = useMail((s) => s.account);
   const from = useMail((s) => s.settings.defaultFrom);
   const setAccount = useMail((s) => s.setAccount);
+  const outbox = useMail((s) => s.outbox ?? []);
   const now = Date.now();
 
   function go(id: FolderId) {
@@ -95,7 +99,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </button>
       <nav className="min-h-0 flex-1 space-y-0.5 overflow-auto px-1" aria-label="Mailbox">
         {FOLDERS.map((item) => {
-          const count = unreadIn(threads, item.id, now, aliases, account);
+          const count = item.id === "outbox" ? outboxBadgeCount(outbox) : unreadIn(threads, item.id, now, aliases, account);
           const Icon = item.icon;
           return (
             <button

@@ -68,6 +68,7 @@ test("the auth schema ships outside the globbed directory", () => {
     { name: "0005_mail_thread_hint.sql", path: "0005_mail_thread_hint.sql" },
     { name: "0006_mail_direction.sql", path: "0006_mail_direction.sql" },
     { name: "0007_mail_done_at.sql", path: "0007_mail_done_at.sql" },
+    { name: "0008_mail_outbound_bridge.sql", path: "0008_mail_outbound_bridge.sql" },
   ]);
   assert.equal(
     pending.some((entry) => entry.name === AUTH_MIGRATION),

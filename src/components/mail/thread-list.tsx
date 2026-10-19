@@ -19,6 +19,7 @@ import {
   type Thread,
   activityIso,
 } from "@/lib/mail/model";
+import { outboxStatusLabel, type OutboxItem } from "@/lib/mail/outbox";
 import { actionForReveal, revealSwipe, swipeActionLabel, swipePrefsOf, swipeTone, type SwipeAction } from "@/lib/mail/swipe";
 import { useMail } from "@/lib/mail/store";
 
@@ -68,6 +69,8 @@ export function ThreadList({
   const selecting = useMail((s) => s.selecting);
   const setSelecting = useMail((s) => s.setSelecting);
   const setListedIds = useMail((s) => s.setListedIds);
+  const outbox = useMail((s) => s.outbox ?? []);
+  const cancelOutbox = useMail((s) => s.cancelOutbox);
   const showChecks = selecting || checked.length > 0;
   const press = useRef<{ x: number; y: number; timer: number } | null>(null);
   const skipClick = useRef(false);
@@ -129,6 +132,10 @@ export function ThreadList({
   const conversationCount = rows.length;
   const senderCards = pendingCards(threads.filter((thread) => (thread.account ?? "grokbot") === account));
   const showStrip = folder === "inbox" && !query && !gateList && gate.mode === "before" && senderCards.length > 0;
+
+  if (folder === "outbox") {
+    return <OutboxList items={outbox} onCancel={cancelOutbox} onCheck={checkMail} />;
+  }
 
   return (
     <section className="paper flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-none lg:w-96 lg:flex-none lg:rounded-3xl">
@@ -603,6 +610,76 @@ function RowChips({ thread, chips }: { thread: Thread; chips: Label[] }) {
       ))}
       {thread.important && <Bookmark className="size-3.5 shrink-0 text-brass" aria-label="Important" />}
     </span>
+  );
+}
+
+function byNewest(a: OutboxItem, b: OutboxItem): number {
+  const at = b.createdAt.localeCompare(a.createdAt);
+  if (at !== 0) return at;
+  return b.id.localeCompare(a.id);
+}
+
+function OutboxList({
+  items,
+  onCancel,
+  onCheck,
+}: {
+  items: OutboxItem[];
+  onCancel: (id: string) => void;
+  onCheck: () => void;
+}) {
+  const rows = [...items].sort(byNewest);
+  return (
+    <section className="paper flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-none lg:w-96 lg:flex-none lg:rounded-3xl">
+      <header className="flex min-w-0 max-w-full items-center gap-1 border-b border-line py-1 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-sm font-semibold">Outbox</h1>
+          <p className="truncate text-xs text-muted">
+            {rows.length} send{rows.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <IconButton label="Check mail" onClick={onCheck}>
+          <RefreshCw className="size-5" strokeWidth={1.75} />
+        </IconButton>
+      </header>
+      <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-24 lg:pb-2">
+        {rows.length === 0 ? (
+          <div className="flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
+            <p className="wrap-anywhere max-w-full text-xl font-bold text-balance">No mail waiting to send.</p>
+          </div>
+        ) : (
+          <ul>
+            {rows.map((item) => {
+              const to = item.to.filter(Boolean).join(", ");
+              const cc = item.cc.filter(Boolean).join(", ");
+              const who = [to ? `To: ${to}` : "To: —", cc ? `Cc: ${cc}` : ""].filter(Boolean).join(" · ");
+              return (
+                <li
+                  key={item.id}
+                  className="min-w-0 max-w-full border-b border-line py-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]"
+                >
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-bold">{item.subject || "(no subject)"}</span>
+                    <span className="shrink-0 text-xs text-muted tabular-nums">{formatWhen(item.createdAt)}</span>
+                  </span>
+                  <p className="truncate text-base text-muted">{who}</p>
+                  <p className="mt-1 text-base">{outboxStatusLabel(item.status, item.error)}</p>
+                  {item.status === "queued" ? (
+                    <button
+                      type="button"
+                      className="mt-2 h-11 rounded-full bg-ink/5 px-3 text-base font-semibold"
+                      onClick={() => onCancel(item.id)}
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 

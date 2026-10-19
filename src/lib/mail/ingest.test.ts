@@ -180,7 +180,11 @@ describe("ingest fixtures", () => {
     assert.equal(updated?.delivery, "sent");
     assert.equal(updated?.messageId, "<sent-1@example.test>");
     assert.equal(deliveryForStatus("pending"), "waiting");
+    assert.equal(deliveryForStatus("queued"), "waiting");
+    assert.equal(deliveryForStatus("awaiting_approval"), "waiting");
     assert.equal(deliveryForStatus("rejected"), "failed");
+    assert.equal(deliveryForStatus("declined"), "failed");
+    assert.equal(deliveryForStatus("cancelled"), "failed");
     assert.equal(deliveryForStatus("approved"), "sent");
   });
 

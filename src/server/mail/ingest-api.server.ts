@@ -133,7 +133,7 @@ async function writeAttachments(sql: Sql, messageRef: string, attachments: Attac
   }
 }
 
-async function upsertMessage(sql: Sql, message: Message, unread: boolean): Promise<void> {
+export async function upsertMessage(sql: Sql, message: Message, unread: boolean): Promise<void> {
   const messageId = textOrNull(message.messageId);
   const id = message.id;
   const matches = await sql.query<{ id: string }>(
@@ -255,7 +255,11 @@ async function applyItems(sql: Sql, items: StoredItem[]): Promise<{ accepted: nu
              path = excluded.path`,
           [item.attachment.id, messageRef, item.attachment.filename, item.attachment.mime, bytes, item.attachment.path],
         );
-      } else await upsertSendResult(sql, item.result);
+      } else {
+        await upsertSendResult(sql, item.result);
+        const { applySendResultToOutbound } = await import("./outbox-api.server.ts");
+        await applySendResultToOutbound(sql, item.result);
+      }
       accepted += 1;
     }
     await sql.query("commit");

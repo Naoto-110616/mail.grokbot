@@ -96,7 +96,7 @@ export function Compose() {
           aria-label="From"
           value={compose.from}
           onChange={(e) => patch({ from: e.target.value })}
-          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none"
+          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
         >
           {fromList.map((alias) => (
             <option key={alias.email} value={alias.email}>
@@ -111,7 +111,7 @@ export function Compose() {
           value={compose.to}
           onChange={(e) => patch({ to: e.target.value })}
           placeholder="name@domain"
-          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none"
+          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
         />
         <button type="button" className="text-xs font-medium text-muted" onClick={() => patch({ showCc: !compose.showCc })}>
           Cc
@@ -123,21 +123,24 @@ export function Compose() {
       {compose.showCc && (
         <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
           <span className="w-16 shrink-0 text-xs text-muted">Cc</span>
-          <input value={compose.cc} onChange={(e) => patch({ cc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none" />
+          <input value={compose.cc} onChange={(e) => patch({ cc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none" />
         </label>
       )}
       {compose.showBcc && (
-        <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
-          <span className="w-16 shrink-0 text-xs text-muted">Bcc</span>
-          <input value={compose.bcc} onChange={(e) => patch({ bcc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none" />
-        </label>
+        <>
+          <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
+            <span className="w-16 shrink-0 text-xs text-muted">Bcc</span>
+            <input value={compose.bcc} onChange={(e) => patch({ bcc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none" />
+          </label>
+          <p className="px-3 py-2 text-base text-muted">Bcc isn't supported for bot sends yet and will be dropped.</p>
+        </>
       )}
       <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
         <span className="w-16 shrink-0 text-xs text-muted">Subject</span>
         <input
           value={compose.subject}
           onChange={(e) => patch({ subject: e.target.value })}
-          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none"
+          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
         />
       </label>
       {!compose.to && contacts.length > 0 && (

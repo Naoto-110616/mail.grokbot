@@ -1,0 +1,163 @@
+# Bot send bridge
+
+The app saves each Send on `mail_outbound`. The bot polls that queue and reports what happened. The wake webhook is optional. When it is not configured, the send stays queued and the app says `Queued for approval in Grok Bot`.
+
+Addresses below are examples. Use the mailbox's own addresses.
+
+Send `Authorization: Bearer <INGEST_TOKEN>` on the bot routes. The comparison is the same constant-time check as `POST /api/ingest`. A session cookie does not authorize these routes. A bearer token does not authorize the app's cancel route.
+
+The app does not log the body or the token. Responses send `cache-control: no-store`.
+
+## Status codes
+
+| Status | When | Body |
+| --- | --- | --- |
+| 200 | The call did what it asked | A JSON array, or `{ "id", "status" }` |
+| 400 | The JSON, query, or status value is not in the contract. `sent` without `providerMessageId` is `400` | `{ "error": "invalid" }` |
+| 401 | The credential for that route is missing or wrong | `{ "error": "unauthorized" }` |
+| 404 | That `id` is not in `mail_outbound` | `{ "error": "not found" }` |
+| 405 | The method is wrong for the path | `{ "error": "method" }` and an `Allow` header |
+| 409 | The id exists and this status move is not allowed | `{ "error": "conflict" }` |
+| 503 | `INGEST_TOKEN` is unset or blank, or the write failed | `{ "error": "unavailable" }` |
+
+`401` and `503` for a missing or unset token are decided before the database is opened. A cookie that would open the app still gets `401` on the bot routes. A bearer token on cancel still gets `401`.
+
+## `GET /api/outbox?status=queued`
+
+Bearer token. `status` must be the exact string `queued`. Any other query value, including omitting it, is `400`.
+
+`200` is a JSON array, oldest `created_at` first, then id. A database status of `queued`, `waiting`, or `pending` is listed. `awaiting_approval`, `sent`, `declined`, `failed`, and `cancelled` are not.
+
+Each item has exactly these fields:
+
+```json
+{
+  "id": "send_1",
+  "fromAddress": "you@example.com",
+  "to": ["ada@example.com"],
+  "cc": ["bea@example.com"],
+  "subject": "Hello",
+  "text": "The plain body.",
+  "html": null,
+  "replyTo": { "ingestId": "msg_parent", "subject": "Parent subject" }
+}
+```
+
+- `id` is `mail_outbound.client_send_id`. It is the same id as `clientSendId` on the wake webhook.
+- `fromAddress`, `to`, and `cc` are email strings.
+- `text` is the plain body stored with the send.
+- `html` is a string only when the stored send has one. Compose leaves it `null`.
+- `replyTo` is `null` when the send is not a reply. `ingestId` is the `mail_message.id` of the message being answered, not its RFC Message-ID. `subject` is that row's subject, or `""` when the row is gone.
+- `bcc` is never a field. A blind copy typed in Compose is dropped and is not in this payload. The wake webhook sends `bcc` as `[]`.
+
+## `POST /api/outbox/:id/status`
+
+Bearer token. The body is JSON:
+
+```json
+{
+  "status": "awaiting_approval",
+  "providerMessageId": "prov-1",
+  "error": "optional"
+}
+```
+
+`status` is one of `awaiting_approval`, `sent`, `declined`, `failed`, or `queued`. `cancelled`, `waiting`, `pending`, and `approved` are `400` on this route. `providerMessageId` is required when `status` is `sent` (trimmed, 1–512 characters, no NUL). Otherwise it is optional. `error` is stored up to 2000 characters. On `failed` a missing error is stored as `""`. On `declined` a missing error is stored as `null`. Other successful moves clear `error`.
+
+`200` is `{ "id": "send_1", "status": "awaiting_approval" }`.
+
+Unknown id is `404`. A known id with a status that this route accepts, but that the current row cannot move to, is `409`. The row is unchanged.
+
+### Transitions
+
+Treat a stored status of `waiting` or `pending` as `queued`.
+
+Allowed:
+
+- `queued` → `awaiting_approval`
+- `awaiting_approval` → `sent`
+- `awaiting_approval` → `declined`
+- `awaiting_approval` → `failed`
+- `awaiting_approval` → `queued`
+
+Anything else on this route is `409`, including repeating the row's current status (`queued` → `queued`, `sent` → `sent`).
+
+`queued` → `cancelled` is only `DELETE /api/outbox/:id`.
+
+## `DELETE /api/outbox/:id`
+
+Session cookie (`gb_session`), the same cookie that opens the app. Bearer is not accepted.
+
+Allowed only while the row is `queued`, `waiting`, or `pending`. `200` is `{ "id": "send_1", "status": "cancelled" }`. Any other stored status is `409`. Unknown id is `404`. No session is `401`.
+
+## Sent message
+
+When a move to `sent` is allowed and `providerMessageId` is present, the app updates `mail_outbound.status` to `sent` and inserts one `mail_message`:
+
+- `id` is `msg_<providerMessageId>`
+- `message_id` is the provider id
+- `direction` is `outbound`
+- `from` is the queued From address
+- `date` is the time of this request
+- `bcc` is `[]`
+- `client_send_id` is the outbox id
+- `unread` is false
+
+If `reply_to_message_id` matches a `mail_message.id`, the new row copies that row's `thread_hint` and sets `in_reply_to` to that row's `message_id` (and appends it to references). The sent mail then shows in that thread and in Sent.
+
+If there is no reply row, `thread_hint` is `outbox:<client_send_id>`, which is its own thread. Sent still lists it because the direction is `outbound`.
+
+A second `sent` for the same id is `409` and does not insert another row.
+
+### Idempotency
+
+Posting `POST /api/ingest` later with a message whose `id` is `msg_<providerMessageId>` updates that row. It does not create a second copy. The match is the same one ingest already uses: same `id`, or the same `message_id`.
+
+On that update, an omitted `direction` stays `outbound`, and an omitted `threadHint` stays the hint written at send time. `unread` stays as stored.
+
+## `send-result` through ingest
+
+`POST /api/ingest` with `kind: "send-result"` uses this same status move. The ingest item is still stored either way. The HTTP response stays `200` when the batch is valid. A move that these rules reject does not change `mail_outbound` and does not insert a sent message.
+
+```json
+{
+  "kind": "send-result",
+  "clientSendId": "send_1",
+  "status": "sent",
+  "replyToMessageId": "<parent@example.com>",
+  "sentMessageId": "prov-1",
+  "error": null
+}
+```
+
+`clientSendId` is the outbox id. `sentMessageId` is the provider id used above. `sent` without `sentMessageId` does not move the row.
+
+How `status` is read:
+
+| `send-result` status | Outbox status |
+| --- | --- |
+| `sent`, `approved` | `sent` |
+| `failed`, `rejected`, `error` | `failed` |
+| `declined` | `declined` |
+| `awaiting_approval` | `awaiting_approval` |
+| `queued`, `pending`, `waiting` | `queued` |
+
+Any other string does not move the row. `approved` is accepted only on this ingest item. It is not a `POST /api/outbox/:id/status` value.
+
+The transition table above still applies. `queued` → `sent` is rejected. `awaiting_approval` → `sent` is applied, and the sent message is inserted the same way as the status route.
+
+## What the app shows
+
+Compose Send keeps writing `mail_outbound`. The wake POST still runs when a webhook is configured. When it is not, there is no "did not wake" failure. The toast is `Queued for approval in Grok Bot`.
+
+The Outbox folder lists every saved send. The drawer count is how many are `queued` or `awaiting_approval` (`waiting` and `pending` count as queued).
+
+| Stored status | Label |
+| --- | --- |
+| `queued`, `waiting`, `pending`, `awaiting_approval` | `Waiting for your OK in Grok Bot` |
+| `sent` | `Sent` |
+| `declined` | `Declined` |
+| `failed` | `Failed: <error>` |
+| `cancelled` | `Cancelled` |
+
+Cancel is shown only for `queued` (including a stored `waiting` or `pending` row). It calls `DELETE /api/outbox/:id`.

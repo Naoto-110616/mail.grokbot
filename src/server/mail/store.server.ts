@@ -14,7 +14,7 @@ import {
   type Swatch,
   type Thread,
   DEMO_ADDRESS,
-  WAITING_COPY,
+  QUEUED_TOAST,
   aliasesFor,
   defaultAliases,
   defaultSettings,
@@ -22,6 +22,7 @@ import {
   uid,
 } from "@/lib/mail/model";
 import { reopenDoneThread } from "@/lib/mail/done";
+import { canonicalOutboxStatus, type OutboxItem } from "@/lib/mail/outbox";
 import { replyWebhook, syncWebhook } from "@/lib/mail/webhook-body";
 import { deliverConfigured } from "./bridge.server.ts";
 import { loadMailConfig, type LoadedConfig } from "./config.server.ts";
@@ -55,6 +56,8 @@ type OutboundRow = {
   threadId: string | null;
   message: Message;
   status: string;
+  error: string | null;
+  providerMessageId: string | null;
 };
 
 type Overlay = {
@@ -64,6 +67,7 @@ type Overlay = {
   filters: Filter[];
   drafts: Map<string, Draft>;
   outbound: OutboundRow[];
+  outbox: OutboxItem[];
 };
 
 function asBool(value: unknown): boolean {
@@ -170,20 +174,40 @@ async function readOverlay(): Promise<Overlay | null> {
       thread_id: string | null;
       spec: string;
       status: string;
-    }>`select client_send_id, thread_id, spec, status from mail_outbound`;
+      error: string | null;
+      provider_message_id: string | null;
+      created_at: string;
+    }>`select client_send_id, thread_id, spec, status, error, provider_message_id, created_at from mail_outbound order by created_at asc`;
     const outbound: OutboundRow[] = [];
+    const outbox: OutboxItem[] = [];
     for (const row of outboundRows) {
       const message = readJson<Message>(row.spec);
       if (!message) continue;
-      outbound.push({
+      const stored: OutboundRow = {
         clientSendId: row.client_send_id,
         threadId: row.thread_id,
         message: { ...message, clientSendId: row.client_send_id },
         status: row.status,
+        error: row.error,
+        providerMessageId: row.provider_message_id,
+      };
+      outbound.push(stored);
+      const status = canonicalOutboxStatus(row.status);
+      if (!status) continue;
+      outbox.push({
+        id: row.client_send_id,
+        fromAddress: message.from?.email ?? "",
+        to: (message.to ?? []).map((address) => address.email).filter((email) => email.includes("@")),
+        cc: (message.cc ?? []).map((address) => address.email).filter((email) => email.includes("@")),
+        subject: message.subject ?? "",
+        text: message.body ?? "",
+        status,
+        error: row.error,
+        createdAt: row.created_at || message.date,
       });
     }
 
-    return { threads, hidden, labels: labelsOut, filters, drafts, outbound };
+    return { threads, hidden, labels: labelsOut, filters, drafts, outbound, outbox };
   } catch {
     return null;
   }
@@ -208,6 +232,18 @@ function applyState(thread: Thread, state: ThreadState | undefined): Thread {
 function mergeOutbound(threads: Thread[], outbound: OutboundRow[], results: SendResult[], hidden: Set<string>): Thread[] {
   const next = threads.map((thread) => ({ ...thread, messages: thread.messages.map((message) => ({ ...message })) }));
   for (const row of outbound) {
+    if (canonicalOutboxStatus(row.status) === "sent") {
+      const sentId = row.providerMessageId ? `msg_${row.providerMessageId}` : null;
+      const present = next.some((thread) =>
+        thread.messages.some(
+          (item) =>
+            item.clientSendId === row.clientSendId ||
+            (sentId !== null && item.id === sentId) ||
+            (row.providerMessageId !== null && item.messageId === row.providerMessageId),
+        ),
+      );
+      if (present) continue;
+    }
     let message = applySendResults([row.message], results)[0] ?? row.message;
     if (!results.some((result) => result.clientSendId === row.clientSendId)) {
       message = { ...message, delivery: deliveryForStatus(row.status), clientSendId: row.clientSendId };
@@ -327,6 +363,7 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
     gmail: "off",
     hiddenThreadIds: [...hidden],
     settings,
+    outbox: overlay?.outbox ?? current?.outbox ?? [],
   };
 }
 
@@ -390,17 +427,20 @@ async function persistMailbox(data: MailData): Promise<void> {
     for (const thread of threads) {
       for (const message of thread.messages) {
         if (!message.clientSendId) continue;
-        const status = message.delivery === "failed" ? "failed" : message.delivery === "sent" ? "sent" : "waiting";
-        await sql`insert into mail_outbound (client_send_id, thread_id, spec, status, created_at) values (
+        const status = message.delivery === "failed" ? "failed" : message.delivery === "sent" ? "sent" : "queued";
+        await sql`insert into mail_outbound (client_send_id, thread_id, spec, status, created_at, updated_at) values (
           ${message.clientSendId},
           ${thread.id},
           ${JSON.stringify(message)},
           ${status},
+          ${message.date},
           ${message.date}
         ) on conflict (client_send_id) do update set
           thread_id = excluded.thread_id,
-          spec = excluded.spec,
-          status = excluded.status`;
+          spec = case
+            when mail_outbound.status in ('sent', 'declined', 'failed', 'cancelled', 'awaiting_approval') then mail_outbound.spec
+            else excluded.spec
+          end`;
       }
     }
   } catch {
@@ -503,29 +543,50 @@ function waitingMessage(data: MailData, request: SendRequest, clientSendId: stri
   };
 }
 
-function withDelivery(data: MailData, clientSendId: string, delivery: "waiting" | "sent" | "failed"): MailData {
-  return {
-    ...data,
-    threads: data.threads.map((thread) => ({
-      ...thread,
-      messages: thread.messages.map((message) => (message.clientSendId === clientSendId ? { ...message, delivery } : message)),
-    })),
+async function stampOutbound(clientSendId: string, replyToMessageId: string | null, threadKey: string | null): Promise<void> {
+  const sql = await sqlOrNull();
+  if (!sql) return;
+  try {
+    await sql.query(
+      `update mail_outbound
+       set reply_to_message_id = $2, thread_key = $3, updated_at = $4
+       where client_send_id = $1`,
+      [clientSendId, replyToMessageId, threadKey, new Date().toISOString()],
+    );
+  } catch {
+    // The queued row is still listed. The bot falls back to an empty reply target.
+  }
+}
+
+function withOutboxItem(data: MailData, request: SendRequest, clientSendId: string): MailData {
+  const item: OutboxItem = {
+    id: clientSendId,
+    fromAddress: request.from,
+    to: request.to.map((address) => address.email),
+    cc: request.cc.map((address) => address.email),
+    subject: request.subject,
+    text: request.body,
+    status: "queued",
+    error: null,
+    createdAt: new Date().toISOString(),
   };
+  return { ...data, outbox: [item, ...(data.outbox ?? []).filter((row) => row.id !== clientSendId)] };
 }
 
 export async function sendMailbox(data: MailData, request: SendRequest, root = process.cwd()) {
   const current = assertMail(data);
   const clientSendId = `send_${uid()}`;
   const message = waitingMessage(current, request, clientSendId);
-  let next = insertOutgoing(current, request, message);
+  const next = withOutboxItem(insertOutgoing(current, request, message), request, clientSendId);
   await persistMailbox(next);
+  await stampOutbound(clientSendId, request.replyToId, request.threadId);
   const woke = await deliverConfigured(
     replyWebhook({
       clientSendId,
       from: message.from.email,
       to: request.to.map((address) => address.email),
       cc: request.cc.map((address) => address.email),
-      bcc: request.bcc.map((address) => address.email),
+      bcc: [],
       subject: request.subject,
       text: request.body,
       replyToMessageId: request.replyToMessageId,
@@ -534,10 +595,8 @@ export async function sendMailbox(data: MailData, request: SendRequest, root = p
     }),
     root,
   );
-  if (!woke.ok) {
-    next = withDelivery(next, clientSendId, "failed");
-    await persistMailbox(next);
-    return { data: next, notice: "Grok Bot did not wake. This reply was not sent.", delivery: "failed" as const };
+  if (!woke.ok && woke.error !== "unconfigured") {
+    return { data: next, notice: "Grok Bot did not wake. This reply was not sent.", delivery: "waiting" as const };
   }
-  return { data: next, notice: WAITING_COPY, delivery: "waiting" as const };
+  return { data: next, notice: QUEUED_TOAST, delivery: "waiting" as const };
 }

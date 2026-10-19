@@ -126,3 +126,5 @@ Written when a reply's outcome is known. `pending` and `waiting` leave the UI on
 ```
 
 `clientSendId` matches the id the app sent on the reply webhook. Do not write this file merely because a draft was created.
+
+The same item also updates the queued send when that id matches and the transition in `docs/bot-setup.md` allows it. `approved` counts as `sent` for that row. A move that is not allowed leaves the queued send unchanged. The bot can poll `GET /api/outbox?status=queued` when no wake webhook is configured.
