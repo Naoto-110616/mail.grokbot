@@ -16,7 +16,7 @@ The button clones this repo and asks for these variables. It also adds Neon. Neo
 | -------------------- | ---------------------------------------------------------------------------------- |
 | `GBM_SITE_PASSWORD`  | Password that locks the mailbox.                                                   |
 | `GBM_SESSION_SECRET` | Secret that signs the session cookie.                                              |
-| `GBM_INGEST_TOKEN`   | Bearer token for ingest and the outbox routes.                                    |
+| `GBM_INGEST_TOKEN`   | Bearer token for ingest and the outbox routes.                                     |
 | `GBM_INBOX_ADDRESS`  | Mailbox address, such as `you@example.com`.                                        |
 | `GBM_OWNER_NAME`     | Name shown for that mailbox.                                                       |
 | `GBM_TAGS`           | Plus-tags, comma-separated. A label may follow a colon, as in `ops,books:Reading`. |
@@ -84,4 +84,10 @@ node bot/convert-ingest.mjs message.eml > items.json
 node bot/push-ingest.mjs items.json
 ```
 
-`convert-ingest.mjs` reads a raw message or JSON and writes ingest items. It keeps `deliveredTo` and `account` on each message, including a `Delivered-To` or `X-Original-To` header, so the plus-tag survives. It drops HTML over 1 MiB and attachment bytes over 1 MiB decoded, and it keeps the attachment metadata. `push-ingest.mjs` POSTs that JSON. It refuses a body over 5 MB. Both take the file from argv or `GBM_INGEST_FILE`, and the push target from `GBM_INGEST_URL` or `GBM_APP_ORIGIN` plus `GBM_INGEST_PATH`.
+`convert-ingest.mjs` reads a raw message or JSON and writes ingest items. It keeps `deliveredTo` and `account` on each message, including a `Delivered-To` or `X-Original-To` header, so the plus-tag survives. It drops HTML over 1 MiB and attachment bytes over 1 MiB decoded, and it keeps the attachment metadata. A numeric bot id `n`, or `inboxId` / `botMessageId`, is stored as `msg_<n>`. A custom id keeps that id and is recorded in the ids map (`GBM_IDS_MAP`, or `~/.config/grokbot-mail/ids.json`) so a reply can find `n`. `push-ingest.mjs` POSTs that JSON. It refuses a body over 5 MB. Both take the file from argv or `GBM_INGEST_FILE`, and the push target from `GBM_INGEST_URL` or `GBM_APP_ORIGIN` plus `GBM_INGEST_PATH`.
+
+```sh
+node bot/reply-id.mjs msg_42
+```
+
+`reply-id.mjs` exports `replyInboxId`. It maps an outbox `replyTo.ingestId` of the form `msg_<n>` to the bot inbox message id `n`. Any other id is looked up in that ids map. The CLI prints the id and nothing else.

@@ -2,6 +2,8 @@
 /**
  * Turn a raw message or JSON into the ingest API shape.
  * Paths come from argv or GBM_INGEST_FILE. No tokens are read or written.
+ * A custom ingest id paired with a bot inbox id is merged into the ids map
+ * (GBM_IDS_MAP, or ~/.config/grokbot-mail/ids.json). msg_<n> needs no map entry.
  *
  *   node bot/convert-ingest.mjs message.eml > items.json
  */
@@ -10,6 +12,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { ATTACHMENT_MAX_BYTES, clipHtml, decodeBase64 } from "./ingest-shape.mjs";
+import { canonicalInboxId, idsMapPath, inboxIdFromIngestId, mergeIdsMap } from "./reply-id.mjs";
 
 const PASSTHROUGH = new Set(["account", "thread", "send-result"]);
 
@@ -19,6 +22,35 @@ function stringOf(value) {
 
 export function stableId(basis) {
   return `msg_${createHash("sha256").update(basis).digest("hex").slice(0, 16)}`;
+}
+
+/**
+ * Ingest id for a message. A known bot inbox id n becomes msg_<n>, unless the
+ * source already has a custom id (not a bare integer and not msg_<n>).
+ * botId is set when the source names one, so the caller can write a fallback map.
+ */
+export function assignMessageId(row, basis) {
+  const named = canonicalInboxId(row?.inboxId) ?? canonicalInboxId(row?.botMessageId);
+  const explicit = stringOf(row?.id);
+  const numericId = canonicalInboxId(row?.id);
+  const prefixedId = inboxIdFromIngestId(explicit);
+  const custom = Boolean(explicit) && numericId === null && prefixedId === null;
+  const botId = named ?? numericId ?? prefixedId;
+  let id;
+  if (named && custom) id = explicit;
+  else if (botId) id = `msg_${botId}`;
+  else id = explicit || stableId(basis);
+  return { id, botId: botId ?? null };
+}
+
+/** Map entry for a custom ingest id. msg_<n> needs none. */
+export function fallbackIdEntry(row, item) {
+  if (!item || item.kind !== "message" || !row || typeof row !== "object" || Array.isArray(row)) {
+    return null;
+  }
+  const named = canonicalInboxId(row.inboxId) ?? canonicalInboxId(row.botMessageId);
+  if (!named || item.id === `msg_${named}`) return null;
+  return [item.id, named];
 }
 
 export function headersFrom(value) {
@@ -145,7 +177,7 @@ export function normalizeMessage(row, contentById = {}) {
   const messageId = stringOf(row.messageId) || headerValue(headers, "message-id");
   const body = typeof row.body === "string" ? row.body : stringOf(row.text);
   const basis = messageId || `${from.email}\n${stringOf(row.subject)}\n${body}`;
-  const id = stringOf(row.id) || stableId(basis);
+  const { id } = assignMessageId(row, basis);
   const attachments = Array.isArray(row.attachments)
     ? row.attachments
         .map((file) => normalizeAttachment(file, contentById))
@@ -334,7 +366,17 @@ function contentMapOf(value, base) {
 function normalizeItem(row, contentById) {
   if (typeof row === "string") return messageFromMime(row, contentById);
   if (!row || typeof row !== "object" || Array.isArray(row)) return null;
-  if (typeof row.raw === "string") return messageFromMime(row.raw, contentById);
+  if (typeof row.raw === "string") {
+    const built = messageFromMime(row.raw, contentById);
+    const delivered = stringOf(row.deliveredTo);
+    if (delivered) built.deliveredTo = delivered;
+    const account = stringOf(row.account);
+    if (account) built.account = account;
+    if (row.id !== undefined || row.inboxId !== undefined || row.botMessageId !== undefined) {
+      built.id = assignMessageId(row, built.id).id;
+    }
+    return built;
+  }
   const kind = stringOf(row.kind).toLowerCase();
   if (PASSTHROUGH.has(kind)) return { ...row, kind };
   if (kind === "attachment") {
@@ -360,7 +402,7 @@ export function convertInput(text, contentById = {}) {
     throw error;
   }
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
-    return { items: [messageFromMime(trimmed, contentById)] };
+    return { items: [messageFromMime(trimmed, contentById)], ids: {} };
   }
   let parsed;
   try {
@@ -377,16 +419,20 @@ export function convertInput(text, contentById = {}) {
       ? parsed.items
       : [parsed];
   const items = [];
+  const ids = {};
   for (const row of rows) {
     const item = normalizeItem(row, extra);
-    if (item) items.push(item);
+    if (!item) continue;
+    items.push(item);
+    const entry = fallbackIdEntry(row, item);
+    if (entry) ids[entry[0]] = entry[1];
   }
   if (items.length === 0) {
     const error = new Error("invalid");
     error.code = "invalid";
     throw error;
   }
-  return { items };
+  return { items, ids };
 }
 
 function takeArgs(argv) {
@@ -417,6 +463,9 @@ function isDirectRun() {
 function usage() {
   console.error("Usage: node bot/convert-ingest.mjs <file>");
   console.error("Reads GBM_INGEST_FILE when no path is given. Prints ingest JSON to stdout.");
+  console.error(
+    "A custom id with a bot inbox id is merged into GBM_IDS_MAP, or ~/.config/grokbot-mail/ids.json.",
+  );
 }
 
 async function main() {
@@ -441,12 +490,22 @@ async function main() {
     console.error("invalid");
     process.exit(1);
   }
+  let converted;
   try {
-    process.stdout.write(`${JSON.stringify(convertInput(text, contentById))}\n`);
+    converted = convertInput(text, contentById);
   } catch {
     console.error("invalid");
     process.exit(1);
   }
+  if (Object.keys(converted.ids).length > 0) {
+    try {
+      await mergeIdsMap(idsMapPath(process.env), converted.ids);
+    } catch {
+      console.error("map");
+      process.exit(1);
+    }
+  }
+  process.stdout.write(`${JSON.stringify({ items: converted.items })}\n`);
 }
 
 if (isDirectRun()) {

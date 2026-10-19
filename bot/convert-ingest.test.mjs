@@ -234,8 +234,8 @@ test("push script exits 2 when no origin is configured and files contain no bake
   assert.equal(result.status, 2);
   assert.match(result.stderr, /GBM_APP_ORIGIN/);
   assert.equal(result.stdout, "");
-  const sources = ["ingest-shape.mjs", "convert-ingest.mjs", "push-ingest.mjs"].map((name) =>
-    readFileSync(new URL(`./${name}`, import.meta.url), "utf8"),
+  const sources = ["ingest-shape.mjs", "convert-ingest.mjs", "push-ingest.mjs", "reply-id.mjs"].map(
+    (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8"),
   );
   for (const source of sources) {
     assert.equal(/Bearer\s+[A-Za-z0-9_\-.]{20,}/.test(source), false);
