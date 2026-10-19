@@ -100,6 +100,11 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  html,
+  body {
+    max-width: 100%;
+  }
+
   body {
     margin: 0;
     min-height: 100dvh;
@@ -189,6 +194,8 @@
 .row {
   -webkit-touch-callout: none;
   background: var(--paper);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .row[data-active="true"] {
@@ -288,4 +295,48 @@ optgroup,
   [contenteditable] {
     font-size: max(16px, 1em);
   }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="hidden"]),
+  select,
+  textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* Long tokens must be able to shrink. break-word does not reduce min-content. */
+.wrap-anywhere,
+.mail-body,
+.mail-body p,
+.mail-body li,
+.mail-body blockquote,
+.mail-body a,
+.mail-body pre,
+.mail-body code,
+.mail-body td,
+.mail-body th,
+.mail-body table {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mail-body img,
+.mail-body video {
+  max-width: 100%;
+  height: auto;
+}
+
+.mail-body table {
+  width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  overflow-wrap: anywhere;
+}
+
+.mail-body td,
+.mail-body th {
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }

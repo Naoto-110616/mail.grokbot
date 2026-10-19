@@ -81,8 +81,8 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   const showChips = chipsAllowed(thread) && quickReplies.length > 0;
 
   return (
-    <section className="paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-3xl">
-      <header className="flex items-center gap-0.5 border-b border-line px-1 py-1">
+    <section className="paper flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-none lg:rounded-3xl">
+      <header className="flex min-w-0 max-w-full items-center gap-0.5 border-b border-line px-1 py-1">
         {!split && (
           <IconButton label="Back to list" onClick={onBack}>
             <ChevronLeft className="size-5" />
@@ -140,8 +140,8 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
           )}
         </span>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-8" onClick={() => setMenu(false)}>
-        <div className="mx-auto max-w-2xl">
+      <div className="mail-body min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-8" onClick={() => setMenu(false)}>
+        <div className="mx-auto min-w-0 max-w-2xl">
           {sender && (thread.review || thread.screen === "pending" || thread.screen === "blocked") && (
             <div className="mb-4 rounded-2xl border border-line bg-paper-2 p-3">
               <p className="text-sm font-bold">{thread.screen === "blocked" ? "Blocked sender" : "New sender"}</p>
@@ -161,7 +161,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
               </div>
             </div>
           )}
-          <h1 className="text-lg font-bold leading-6 text-balance">{thread.subject || "(no subject)"}</h1>
+          <h1 className="wrap-anywhere max-w-full text-lg font-bold leading-6 text-balance">{thread.subject || "(no subject)"}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {thread.plusTag && <PlusChip tag={thread.plusTag} />}
             {chips.map((l) => (
@@ -189,7 +189,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
                   <button
                     type="button"
                     aria-expanded={open}
-                    className={`flex w-full gap-3 px-3 py-2 text-left ${open ? "items-start" : "items-center"}`}
+                    className={`flex w-full min-w-0 max-w-full gap-3 px-3 py-2 text-left ${open ? "items-start" : "items-center"}`}
                     onClick={() =>
                       setOpenIds(
                         open ? expanded.filter((id) => id !== message.id) : [...expanded, message.id],
@@ -199,7 +199,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
                     <MessageHeader message={message} open={open} />
                   </button>
                   {open && (
-                    <div className="px-4 pb-4 sm:px-14">
+                    <div className="min-w-0 max-w-full px-3 pb-4 sm:px-14">
                       <Body text={message.body} />
                       {message.attachments.length > 0 && (
                         <ul className="mt-4 flex flex-col gap-2">
@@ -248,7 +248,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
         </div>
       </div>
       {showChips && (
-        <div className="flex gap-2 overflow-x-auto border-t border-line px-3 py-2" role="group" aria-label="Quick replies">
+        <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto border-t border-line py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]" role="group" aria-label="Quick replies">
           {many && (
             <button
               type="button"
@@ -272,20 +272,20 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
           ))}
         </div>
       )}
-      <div className="safe-bottom flex gap-2 border-t border-line px-3 py-2 lg:hidden">
-        <TextBtn onClick={() => openCompose("reply", thread.id)}>
-          <Reply className="size-4" /> Reply
+      <div className="safe-bottom flex min-w-0 max-w-full gap-2 border-t border-line py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] lg:hidden">
+        <TextBtn className="flex-1" onClick={() => openCompose("reply", thread.id)}>
+          <Reply className="size-4 shrink-0" /> <span className="truncate">Reply</span>
         </TextBtn>
-        <TextBtn onClick={() => openCompose("replyAll", thread.id)}>
-          <ReplyAll className="size-4" /> All
+        <TextBtn className="flex-1" onClick={() => openCompose("replyAll", thread.id)}>
+          <ReplyAll className="size-4 shrink-0" /> <span className="truncate">All</span>
         </TextBtn>
-        <TextBtn onClick={() => openCompose("forward", thread.id)}>
-          <Forward className="size-4" /> Forward
+        <TextBtn className="flex-1" onClick={() => openCompose("forward", thread.id)}>
+          <Forward className="size-4 shrink-0" /> <span className="truncate">Forward</span>
         </TextBtn>
       </div>
       {file && (
         <Sheet title={file.filename} onClose={() => setFile(null)} wide>
-          <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-2xl bg-paper-2 p-3 font-sans text-xs text-ink">{previewForPath(file.path)}</pre>
+          <pre className="mail-body max-h-80 max-w-full overflow-auto whitespace-pre-wrap rounded-2xl bg-paper-2 p-3 font-sans text-xs text-ink">{previewForPath(file.path)}</pre>
           <button
             type="button"
             className="mt-3 inline-flex h-11 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-accent-fg"
@@ -305,9 +305,9 @@ function MessageHeader({ message, open }: { message: Message; open: boolean }) {
     return (
       <>
         <Monogram name={message.from.name} email={message.from.email} />
-        <span className="max-w-[42%] shrink-0 truncate text-sm font-bold">{message.from.name || message.from.email}</span>
+        <span className="max-w-[42%] min-w-0 shrink truncate text-sm font-bold">{message.from.name || message.from.email}</span>
         <span className="min-w-0 flex-1 truncate text-xs text-muted">{plainSnippet(message.body)}</span>
-        <span className="shrink-0 text-xs text-muted tabular-nums">{formatWhen(message.date)}</span>
+        <span className="max-w-[30%] shrink-0 truncate text-xs text-muted tabular-nums">{formatWhen(message.date)}</span>
       </>
     );
   }
@@ -333,12 +333,12 @@ function MenuBtn({ children, onClick }: { children: string; onClick: () => void 
   );
 }
 
-function TextBtn({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+function TextBtn({ children, onClick, className = "" }: { children: ReactNode; onClick: () => void; className?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex h-11 items-center gap-2 rounded-full border border-line px-4 text-sm font-medium hover:bg-ink/5"
+      className={`inline-flex h-11 min-w-0 items-center justify-center gap-2 overflow-hidden rounded-full border border-line px-3 text-sm font-medium hover:bg-ink/5 ${className}`}
     >
       {children}
     </button>
@@ -349,7 +349,7 @@ function Body({ text }: { text: string }) {
   const doc = useMemo(() => parseBody(text), [text]);
   const [trimmed, setTrimmed] = useState(false);
   return (
-    <div className="space-y-3 text-[15px] font-normal leading-5 text-ink">
+    <div className="mail-body min-w-0 max-w-full space-y-3 text-[15px] font-normal leading-5 text-ink">
       <BodyBlocks blocks={doc.blocks} />
       {doc.hidden && (
         <div>
@@ -399,13 +399,13 @@ function BodyBlocks({ blocks }: { blocks: BodyBlock[] }) {
         }
         if (block.kind === "quote") {
           return (
-            <blockquote key={index} className="whitespace-pre-wrap border-l-2 border-line pl-3 text-muted">
+            <blockquote key={index} className="wrap-anywhere whitespace-pre-wrap border-l-2 border-line pl-3 text-muted">
               <Inlines inlines={block.inlines} />
             </blockquote>
           );
         }
         return (
-          <p key={index} className="whitespace-pre-wrap text-pretty break-words">
+          <p key={index} className="wrap-anywhere whitespace-pre-wrap text-pretty">
             <Inlines inlines={block.inlines} />
           </p>
         );
@@ -429,7 +429,7 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
 
 function Anchor({ href, label }: { href: string; label: string }) {
   return (
-    <a href={href} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
+    <a href={href} target="_blank" rel="noreferrer" className="wrap-anywhere inline max-w-full text-accent underline-offset-2 hover:underline">
       {label}
     </a>
   );

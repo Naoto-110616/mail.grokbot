@@ -106,7 +106,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
               onClick={() => go(item.id)}
             >
               <Icon className="size-5 shrink-0" strokeWidth={1.75} />
-              <span className="flex-1 text-left">{folderLabel(item.id, labels)}</span>
+              <span className="min-w-0 flex-1 truncate text-left">{folderLabel(item.id, labels)}</span>
               {count > 0 && <span className="text-xs font-semibold text-accent tabular-nums">{count}</span>}
             </button>
           );
@@ -179,7 +179,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
       <button type="button" className="nav-item mx-1 mt-2" onClick={() => setSettings(true)}>
         <Settings className="size-5" strokeWidth={1.75} />
-        <span className="flex-1 text-left">Settings</span>
+        <span className="min-w-0 flex-1 truncate text-left">Settings</span>
       </button>
     </div>
   );

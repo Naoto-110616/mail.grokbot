@@ -30,8 +30,8 @@ export function Overlays({ rows }: { rows: { id: string; subject: string }[] }) 
       {snoozeOpen && <Snooze />}
       {labelMenu && <Labels />}
       {toast && (
-        <div role="status" aria-label={toastLabel(toast.text)} className="glass fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] left-1/2 z-[80] flex w-max max-w-[min(17rem,calc(100%-3rem))] -translate-x-1/2 items-center gap-2 rounded-full py-1.5 pl-4 pr-1.5 lg:bottom-6">
-          <span className="truncate text-sm">{toast.text}</span>
+        <div role="status" aria-label={toastLabel(toast.text)} className="glass fixed bottom-[calc(6.75rem+env(safe-area-inset-bottom))] left-[max(0.75rem,env(safe-area-inset-left))] right-[max(0.75rem,env(safe-area-inset-right))] z-[80] mx-auto flex w-fit max-w-[min(17rem,calc(100%-1.5rem))] min-w-0 items-center gap-2 overflow-hidden rounded-full py-1.5 pl-4 pr-1.5 lg:bottom-6">
+          <span className="min-w-0 truncate text-sm">{toast.text}</span>
           {toast.snapshot && (
             <button type="button" className="h-9 rounded-full bg-accent px-3 text-sm font-semibold text-accent-fg" onClick={undo}>
               Undo
@@ -73,7 +73,7 @@ function Palette({ onClose, rowIds }: { onClose: () => void; rowIds: { id: strin
       <button type="button" aria-label="Close commands" className="absolute inset-0 bg-ink/25" onClick={onClose} />
       <Command
         label="Commands"
-        className="glass rise absolute left-1/2 top-[10%] w-[min(36rem,calc(100%-1.5rem))] -translate-x-1/2 overflow-hidden rounded-3xl"
+        className="glass rise absolute left-3 right-3 top-[10%] mx-auto max-w-xl overflow-hidden rounded-3xl"
       >
         <Command.Input
           autoFocus

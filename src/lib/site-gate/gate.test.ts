@@ -21,6 +21,7 @@ import {
   type SecurityState,
 } from "./gate.ts";
 import { handleSiteRequest } from "./handle.server.ts";
+import { localhostGateOpen } from "./localhost-gate.ts";
 import { GATE_COPY } from "./messages.ts";
 import { LOGIN_NEXT_FIELD, LOGIN_PASSWORD_FIELD } from "./paths.ts";
 import { loadSecurity, passwordChangesEnabled, savePasswordHash } from "./store.server.ts";
@@ -431,7 +432,15 @@ describe("site gate", () => {
 });
 
 describe("site gate without a database", () => {
-  const envKeys = ["DATABASE_URL", "SESSION_VERSION", "APP_PASSWORD", "SESSION_SECRET", "INGEST_TOKEN"] as const;
+  const envKeys = [
+    "DATABASE_URL",
+    "SESSION_VERSION",
+    "APP_PASSWORD",
+    "SESSION_SECRET",
+    "INGEST_TOKEN",
+    "NODE_ENV",
+    "MAIL_LOCALHOST_GATE",
+  ] as const;
   const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Record<
     (typeof envKeys)[number],
     string | undefined
@@ -576,6 +585,70 @@ describe("site gate without a database", () => {
     process.env.DATABASE_URL = "postgres://db.example/mail";
     assert.equal(passwordChangesEnabled(), true);
     assert.equal(pgliteStarted(), false);
+  });
+
+  it("keeps the password gate in production, including loopback with the dev flag", async () => {
+    assert.equal(
+      localhostGateOpen({ nodeEnv: "production", flag: "open", urlHost: "127.0.0.1", headerHost: "127.0.0.1" }),
+      false,
+    );
+    assert.equal(
+      localhostGateOpen({ nodeEnv: "production", flag: "open", urlHost: "localhost", headerHost: null }),
+      false,
+    );
+    assert.equal(
+      localhostGateOpen({ nodeEnv: "development", flag: "open", urlHost: "127.0.0.1:9", headerHost: "127.0.0.1:9" }),
+      true,
+    );
+    assert.equal(
+      localhostGateOpen({ nodeEnv: "development", flag: "open", urlHost: "mail.example", headerHost: "127.0.0.1" }),
+      false,
+    );
+    assert.equal(
+      localhostGateOpen({ nodeEnv: "development", flag: "open", urlHost: "127.0.0.1", headerHost: "mail.example" }),
+      false,
+    );
+    assert.equal(
+      localhostGateOpen({ nodeEnv: "development", flag: "yes", urlHost: "127.0.0.1", headerHost: "127.0.0.1" }),
+      false,
+    );
+    assert.equal(
+      localhostGateOpen({ nodeEnv: undefined, flag: "open", urlHost: "127.0.0.1", headerHost: "127.0.0.1" }),
+      false,
+    );
+
+    process.env.MAIL_LOCALHOST_GATE = "open";
+    delete process.env.APP_PASSWORD;
+    delete process.env.SESSION_SECRET;
+    try {
+      process.env.NODE_ENV = "production";
+      const prod = await handleSiteRequest({
+        request: new Request("http://127.0.0.1/", { headers: { host: "127.0.0.1" } }),
+        pathname: "/",
+        handlerType: "router",
+      });
+      assert.equal(prod?.status, 302);
+      assert.equal(prod?.headers.get("location"), "/login?next=%2F");
+
+      process.env.NODE_ENV = "development";
+      const remote = await handleSiteRequest({
+        request: new Request("https://mail.example/", {
+          headers: { host: "mail.example", "x-forwarded-host": "127.0.0.1" },
+        }),
+        pathname: "/",
+        handlerType: "router",
+      });
+      assert.equal(remote?.status, 302);
+
+      const open = await handleSiteRequest({
+        request: new Request("http://127.0.0.1:9/", { headers: { host: "127.0.0.1:9" } }),
+        pathname: "/",
+        handlerType: "router",
+      });
+      assert.equal(open, null);
+    } finally {
+      restoreEnv();
+    }
   });
 
   it("rejects ingest when INGEST_TOKEN is unset and does not open a database", async () => {

@@ -270,8 +270,8 @@ export function MailShell({
   }, []);
 
   return (
-    <div className="stage flex h-dvh min-h-0 flex-col gap-2 px-1.5 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] lg:gap-3 lg:p-3">
-      <header className="glass flex h-14 shrink-0 items-center rounded-full pl-1 pr-1">
+    <div className="stage flex h-dvh min-h-0 min-w-0 max-w-full flex-col gap-2 px-0 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] lg:gap-3 lg:p-3">
+      <header className="glass ml-[max(0.5rem,env(safe-area-inset-left))] mr-[max(0.5rem,env(safe-area-inset-right))] flex h-14 min-w-0 shrink-0 items-center rounded-full pl-1 pr-1 lg:mx-0">
         <IconButton label="Mailbox" className="lg:hidden" onClick={() => setDrawer(true)}>
           <Menu className="size-5" />
         </IconButton>
@@ -290,7 +290,7 @@ export function MailShell({
               event.currentTarget.blur();
             }}
             placeholder="Search mail"
-            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-faint"
+            className="w-0 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-faint"
           />
           {trimmedQuery && (
             <button
@@ -321,8 +321,8 @@ export function MailShell({
       </header>
 
       {searchFocus && (
-        <div className="glass shrink-0 rounded-2xl p-2">
-          <div className="flex gap-2 overflow-x-auto" aria-label="Search suggestions">
+        <div className="glass ml-[max(0.5rem,env(safe-area-inset-left))] mr-[max(0.5rem,env(safe-area-inset-right))] min-w-0 shrink-0 rounded-2xl p-2 lg:mx-0">
+          <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto" aria-label="Search suggestions">
             {SEARCH_SUGGESTIONS.map((hint) => (
               <button
                 key={hint}
@@ -369,7 +369,7 @@ export function MailShell({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 gap-2 lg:gap-3">
+      <div className="flex min-h-0 min-w-0 max-w-full flex-1 gap-2 lg:gap-3">
         <aside className="glass hidden w-64 shrink-0 flex-col overflow-hidden rounded-3xl p-2 lg:flex">
           <Sidebar />
         </aside>
@@ -392,7 +392,7 @@ export function MailShell({
 
       {!(viewing === "thread" && !desktop) && (
         <nav
-          className="glass safe-bottom fixed inset-x-1.5 bottom-2 z-30 flex items-end justify-around rounded-full px-1 pt-1 lg:hidden"
+          className="glass safe-bottom fixed bottom-2 left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] z-30 flex min-w-0 max-w-full items-end justify-around overflow-hidden rounded-full px-1 pt-1 lg:hidden"
           aria-label={checked.length > 0 ? "Batch" : "Primary"}
         >
           {checked.length > 0 ? (
@@ -427,7 +427,7 @@ export function MailShell({
               <button
                 type="button"
                 onClick={() => openCompose("new")}
-                className="mb-1 inline-flex size-14 items-center justify-center rounded-full bg-accent text-accent-fg"
+                className="mb-1 inline-flex size-14 shrink-0 items-center justify-center rounded-full bg-accent text-accent-fg"
                 aria-label="Compose"
               >
                 <PenLine className="size-6" />
@@ -469,7 +469,10 @@ export function MailShell({
       {drawer && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button type="button" aria-label="Close menu" className="absolute inset-0 bg-ink/30" onClick={() => setDrawer(false)} />
-          <div className="glass rise absolute bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-1.5 top-[max(0.5rem,env(safe-area-inset-top))] flex w-72 flex-col overflow-hidden rounded-3xl p-2">
+          <div
+            className="glass rise absolute bottom-[max(0.5rem,env(safe-area-inset-bottom))] left-[max(0.5rem,env(safe-area-inset-left))] top-[max(0.5rem,env(safe-area-inset-top))] flex min-w-0 max-w-full flex-col overflow-hidden rounded-3xl p-2"
+            style={{ width: "min(18rem, calc(100% - max(0.5rem, env(safe-area-inset-left)) - max(0.5rem, env(safe-area-inset-right))))" }}
+          >
             <Sidebar onNavigate={() => setDrawer(false)} />
           </div>
         </div>
@@ -504,9 +507,9 @@ function Tab({
   children: ReactNode;
 }) {
   return (
-    <button type="button" onClick={onClick} className="relative flex h-14 w-14 flex-col items-center justify-center text-xs font-medium">
+    <button type="button" onClick={onClick} className="relative flex h-14 w-14 min-w-0 shrink flex-col items-center justify-center overflow-hidden text-xs font-medium">
       <span className={active ? "text-accent" : "text-ink"}>{children}</span>
-      <span className={active ? "text-accent" : "text-muted"}>{label}</span>
+      <span className={`max-w-full truncate ${active ? "text-accent" : "text-muted"}`}>{label}</span>
       {!!count && count > 0 && (
         <span className="absolute right-1 top-1 min-w-4 rounded-full bg-accent px-1 text-center text-xs font-semibold text-accent-fg tabular-nums">
           {count}

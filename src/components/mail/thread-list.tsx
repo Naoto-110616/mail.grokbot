@@ -131,8 +131,8 @@ export function ThreadList({
   const showStrip = folder === "inbox" && !query && !gateList && gate.mode === "before" && senderCards.length > 0;
 
   return (
-    <section className="paper flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl lg:w-96 lg:flex-none lg:rounded-3xl">
-      <header className="flex items-center gap-1 border-b border-line px-2 py-1">
+    <section className="paper flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-none lg:w-96 lg:flex-none lg:rounded-3xl">
+      <header className="flex min-w-0 max-w-full items-center gap-1 border-b border-line py-1 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         {folder === "inbox" && !query && !showChecks && (
           <button
             type="button"
@@ -215,7 +215,7 @@ export function ThreadList({
         )}
       </header>
       {folder === "inbox" && !query && (
-        <div className="flex gap-1 overflow-auto px-3 py-2" role="tablist" aria-label="Categories">
+        <div className="flex min-w-0 max-w-full gap-1 overflow-x-auto py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]" role="tablist" aria-label="Categories">
           {CATEGORIES.map((tab) => {
             const count = categoryCount(threads, tab.id, now, aliases, account);
             const on = category === tab.id;
@@ -250,7 +250,7 @@ export function ThreadList({
       )}
       <div
         ref={box}
-        className="min-h-0 flex-1 overflow-auto pb-24 lg:pb-2"
+        className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-24 lg:pb-2"
         onPointerDown={(event) => {
           if (!box.current || box.current.scrollTop > 0) return;
           if (event.target instanceof Element && event.target.closest(".row, button, a, input, label")) return;
@@ -324,7 +324,7 @@ export function ThreadList({
                     data-active={openId === thread.id}
                     data-cursor={cursor === index}
                     data-done={done}
-                    className={`row group flex w-full gap-2 border-b border-line px-2 text-left ${rowPad}`}
+                    className={`row group flex w-full min-w-0 max-w-full gap-2 border-b border-line text-left pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] ${rowPad}`}
                     onPointerDown={(event) => armPress(event, thread.id, index)}
                     onPointerMove={movePress}
                     onPointerUp={clearPress}
@@ -366,14 +366,14 @@ export function ThreadList({
                         email={thread.messages[0]?.from.email ?? "draft"}
                       />
                     )}
-                    <span className="min-w-0 flex-1">
+                    <span className="min-w-0 flex-1 overflow-hidden">
                       <span className="flex min-w-0 items-center gap-1.5 leading-5">
                         {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
-                        <span className="truncate text-sm font-bold leading-5">
+                        <span className="min-w-0 truncate text-sm font-bold leading-5">
                           {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
                         </span>
                         {density === "compact" && <RowChips thread={thread} chips={chips} />}
-                        <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                        <span className="ml-auto flex min-w-0 max-w-[50%] shrink-0 items-center gap-0.5 overflow-hidden">
                           <span className="text-xs leading-4 text-muted tabular-nums">{when}</span>
                           <button
                             type="button"
@@ -390,7 +390,7 @@ export function ThreadList({
                           {folder === "blocked" && (
                             <button
                               type="button"
-                              className="h-11 shrink-0 rounded-full px-2 text-sm font-semibold text-accent"
+                              className="h-11 min-w-0 max-w-full shrink truncate rounded-full px-2 text-sm font-semibold text-accent"
                               onPointerDown={(event) => event.stopPropagation()}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -415,7 +415,7 @@ export function ThreadList({
                           </button>
                         </span>
                       </span>
-                      <span className="block truncate text-sm font-bold leading-5">
+                      <span className="block max-w-full truncate text-sm font-bold leading-5">
                         {thread.subject || "(no subject)"}
                       </span>
                       {density !== "compact" && (snippet || draftMark || thread.plusTag || chips.length > 0 || thread.important) && (
@@ -454,7 +454,7 @@ function NewSenderStrip({
   onDomain: (domain: string) => void;
 }) {
   return (
-    <div className="border-b border-line px-3 py-2">
+    <div className="min-w-0 max-w-full border-b border-line py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
       <div className="mb-2 flex items-center gap-2">
         <p className="min-w-0 flex-1 truncate text-sm font-bold">New senders</p>
         <span className="text-sm font-semibold text-accent tabular-nums">{cards.length}</span>
@@ -462,7 +462,7 @@ function NewSenderStrip({
           See all
         </button>
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto pb-1">
         {cards.slice(0, 8).map((card) => (
           <SenderFace key={card.email} card={card} onAccept={onAccept} onBlock={onBlock} onDomain={onDomain} />
         ))}
@@ -608,8 +608,8 @@ function RowChips({ thread, chips }: { thread: Thread; chips: Label[] }) {
 
 function Empty({ query, fresh }: { query: string; fresh: boolean }) {
   return (
-    <div className="flex h-full min-h-64 flex-col items-center justify-center px-8 text-center">
-      <p className="text-xl font-bold text-balance">
+    <div className="flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
+      <p className="wrap-anywhere max-w-full text-xl font-bold text-balance">
         {fresh ? "No mail yet. Your bot will deliver new mail here." : query ? "No results" : "No messages"}
       </p>
     </div>
@@ -619,8 +619,8 @@ function Empty({ query, fresh }: { query: string; fresh: boolean }) {
 function FreshAddress({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="rise flex h-full min-h-64 flex-col items-center justify-center px-8 text-center">
-      <p className="text-xl font-bold text-balance text-ink">No mail yet. Your bot will deliver new mail here.</p>
+    <div className="rise flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
+      <p className="wrap-anywhere max-w-full text-xl font-bold text-balance text-ink">No mail yet. Your bot will deliver new mail here.</p>
       <p className="mt-3 max-w-full truncate text-sm text-ink">{address}</p>
       <button
         type="button"

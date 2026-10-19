@@ -70,15 +70,15 @@ export function Compose() {
     <form
       className={
         compose.expanded
-          ? "paper fixed inset-2 z-40 flex flex-col overflow-hidden rounded-3xl"
-          : "paper fixed inset-0 z-40 flex flex-col overflow-hidden lg:inset-auto lg:bottom-4 lg:right-4 lg:h-[36rem] lg:w-[34rem] lg:rounded-3xl"
+          ? "paper fixed inset-2 z-40 flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden rounded-3xl"
+          : "paper fixed inset-0 z-40 flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] lg:inset-auto lg:bottom-4 lg:right-4 lg:h-[36rem] lg:w-[min(34rem,calc(100%-2rem))] lg:max-w-[34rem] lg:rounded-3xl lg:pl-0 lg:pr-0"
       }
       onSubmit={(e) => {
         e.preventDefault();
         send();
       }}
     >
-      <header className="glass flex items-center gap-2 rounded-none border-x-0 border-t-0 px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] lg:py-2">
+      <header className="glass flex min-w-0 items-center gap-2 rounded-none border-x-0 border-t-0 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] lg:py-2">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>
         <IconButton label={compose.expanded ? "Exit full screen" : "Full screen"} className="hidden lg:inline-flex" onClick={() => patch({ expanded: !compose.expanded })}>
           <span className="text-xs font-semibold">{compose.expanded ? "Exit" : "Full"}</span>
@@ -90,13 +90,13 @@ export function Compose() {
           <X className="size-5" />
         </IconButton>
       </header>
-      <div className="flex items-center gap-2 border-b border-line px-4">
+      <div className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
         <span className="w-16 shrink-0 text-xs text-muted">From</span>
         <select
           aria-label="From"
           value={compose.from}
           onChange={(e) => patch({ from: e.target.value })}
-          className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none"
+          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none"
         >
           {fromList.map((alias) => (
             <option key={alias.email} value={alias.email}>
@@ -105,13 +105,13 @@ export function Compose() {
           ))}
         </select>
       </div>
-      <label className="flex items-center gap-2 border-b border-line px-4">
+      <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
         <span className="w-16 shrink-0 text-xs text-muted">To</span>
         <input
           value={compose.to}
           onChange={(e) => patch({ to: e.target.value })}
           placeholder="name@domain"
-          className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none"
+          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none"
         />
         <button type="button" className="text-xs font-medium text-muted" onClick={() => patch({ showCc: !compose.showCc })}>
           Cc
@@ -121,27 +121,27 @@ export function Compose() {
         </button>
       </label>
       {compose.showCc && (
-        <label className="flex items-center gap-2 border-b border-line px-4">
+        <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
           <span className="w-16 shrink-0 text-xs text-muted">Cc</span>
-          <input value={compose.cc} onChange={(e) => patch({ cc: e.target.value })} className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          <input value={compose.cc} onChange={(e) => patch({ cc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none" />
         </label>
       )}
       {compose.showBcc && (
-        <label className="flex items-center gap-2 border-b border-line px-4">
+        <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
           <span className="w-16 shrink-0 text-xs text-muted">Bcc</span>
-          <input value={compose.bcc} onChange={(e) => patch({ bcc: e.target.value })} className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none" />
+          <input value={compose.bcc} onChange={(e) => patch({ bcc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none" />
         </label>
       )}
-      <label className="flex items-center gap-2 border-b border-line px-4">
+      <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
         <span className="w-16 shrink-0 text-xs text-muted">Subject</span>
         <input
           value={compose.subject}
           onChange={(e) => patch({ subject: e.target.value })}
-          className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none"
+          className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-sm outline-none"
         />
       </label>
       {!compose.to && contacts.length > 0 && (
-        <div className="flex gap-2 overflow-auto px-4 py-2">
+        <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto px-3 py-2">
           {contacts.map((c) => (
             <button
               key={c.email}
@@ -158,7 +158,7 @@ export function Compose() {
         ref={area}
         value={compose.body}
         onChange={(e) => patch({ body: e.target.value })}
-        className="min-h-0 w-full flex-1 resize-none bg-transparent px-4 py-3 text-base font-normal leading-relaxed outline-none"
+        className="mail-body min-h-0 w-full min-w-0 max-w-full flex-1 resize-none bg-transparent px-3 py-3 text-base font-normal leading-relaxed outline-none"
         aria-label="Message"
       />
       {compose.attachments.length > 0 && (
@@ -173,27 +173,29 @@ export function Compose() {
           ))}
         </ul>
       )}
-      <footer className="safe-bottom flex items-center gap-1 border-t border-line px-2 py-1">
-        <button type="submit" className="h-11 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg">
+      <footer className="safe-bottom flex min-w-0 max-w-full items-center gap-1 border-t border-line px-2 py-1">
+        <button type="submit" className="h-11 shrink-0 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg">
           Send
         </button>
-        <IconButton label="Bold" onClick={() => wrap("**", "**")}>
-          <Bold className="size-4" />
-        </IconButton>
-        <IconButton label="Italic" onClick={() => wrap("*", "*")}>
-          <Italic className="size-4" />
-        </IconButton>
-        <IconButton label="Link" onClick={() => wrap("[", "](https://)")}>
-          <Link2 className="size-4" />
-        </IconButton>
-        <IconButton label="List" onClick={() => wrap("- ", "")}>
-          <List className="size-4" />
-        </IconButton>
-        <IconButton label="Attach" onClick={() => fileRef.current?.click()}>
-          <Paperclip className="size-4" />
-        </IconButton>
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+          <IconButton label="Bold" onClick={() => wrap("**", "**")}>
+            <Bold className="size-4" />
+          </IconButton>
+          <IconButton label="Italic" onClick={() => wrap("*", "*")}>
+            <Italic className="size-4" />
+          </IconButton>
+          <IconButton label="Link" onClick={() => wrap("[", "](https://)")}>
+            <Link2 className="size-4" />
+          </IconButton>
+          <IconButton label="List" onClick={() => wrap("- ", "")}>
+            <List className="size-4" />
+          </IconButton>
+          <IconButton label="Attach" onClick={() => fileRef.current?.click()}>
+            <Paperclip className="size-4" />
+          </IconButton>
+        </div>
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
-        <button type="button" className="ml-auto h-11 px-3 text-sm text-muted" onClick={dismiss}>
+        <button type="button" className="h-11 shrink-0 px-3 text-sm text-muted" onClick={dismiss}>
           Save draft
         </button>
       </footer>

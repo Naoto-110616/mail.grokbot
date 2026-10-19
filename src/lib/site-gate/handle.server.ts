@@ -6,6 +6,7 @@ import {
   sessionAllowed,
   type GateDeps,
 } from "./gate.ts";
+import { requestLocalhostGateOpen } from "./localhost-gate.ts";
 import { isIngestApiPath } from "./paths.ts";
 import { loadSecurity, savePasswordHash } from "./store.server.ts";
 
@@ -33,6 +34,8 @@ export async function handleSiteRequest(input: {
       const { handleIngestApi } = await import("../../server/mail/ingest-api.server.ts");
       return await handleIngestApi(input.request);
     }
+    // Dev loopback only. NODE_ENV=production never takes this branch.
+    if (requestLocalhostGateOpen(input.request)) return null;
     return await handleGate(
       input.request,
       {
@@ -59,6 +62,7 @@ export async function assertSiteSession(): Promise<void> {
   } catch {
     throw unauthorized();
   }
+  if (requestLocalhostGateOpen(request)) return;
   let allowed = false;
   try {
     allowed = await sessionAllowed(request, liveDeps());

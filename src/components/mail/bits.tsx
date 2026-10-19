@@ -58,7 +58,7 @@ export function LabelChip({ label, className }: { label: Label; className?: stri
 
 export function PlusChip({ tag, className }: { tag: string; className?: string }) {
   return (
-    <span className={cn("inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent", className)}>
+    <span className={cn("inline-flex max-w-full min-w-0 items-center truncate rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent", className)}>
       +{tag}
     </span>
   );
@@ -83,12 +83,12 @@ export function Sheet({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "glass rise relative z-10 max-h-[86dvh] w-full overflow-auto rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-3xl",
+          "glass rise relative z-10 max-h-[86dvh] w-full min-w-0 max-w-full overflow-auto rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-3xl",
           wide ? "sm:w-[40rem]" : "sm:w-[28rem]",
         )}
       >
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-balance">{title}</h2>
+          <h2 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h2>
           <IconButton label="Close" onClick={onClose}>
             <CloseIcon />
           </IconButton>

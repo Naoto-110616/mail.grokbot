@@ -64,12 +64,12 @@ export function SwipeRow({
 
   const look = preview(dx);
   return (
-    <div className="relative overflow-hidden">
+    <div className="relative w-full min-w-0 max-w-full overflow-hidden">
       <div className={`absolute inset-0 flex items-center px-4 ${dx < 0 ? "justify-end" : "justify-start"} ${look.className}`}>
         <span className="text-sm font-semibold">{look.label}</span>
       </div>
       <div
-        className="relative"
+        className="relative w-full min-w-0 max-w-full"
         style={{ transform: `translate3d(${dx}px,0,0)`, transition: dragging ? "none" : "transform 120ms ease" }}
         onPointerDown={(event) => {
           if (!enabled) return;
