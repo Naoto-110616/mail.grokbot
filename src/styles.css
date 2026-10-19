@@ -339,6 +339,12 @@ optgroup,
   overflow-x: clip;
 }
 
+/* The inline border box follows the font, not the 1.5 line-height, so 10px of padding stays under 44px. 13px clears it. The matching negative margin keeps the line box. */
+.mail-inline-link {
+  padding-block: 13px;
+  margin-block: -13px;
+}
+
 .mail-body img,
 .mail-body video {
   max-width: 100%;
