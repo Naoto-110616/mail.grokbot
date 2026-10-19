@@ -20,7 +20,7 @@ import {
   applyFilters,
   defaultAliases,
   defaultSettings,
-  settingsFromUnknown,
+  hydrateDisplaySettings,
   signatureFor,
   uid,
   wakeMissNotice,
@@ -28,7 +28,8 @@ import {
 } from "@/lib/mail/model";
 import { applySenderRules } from "@/lib/mail/bundles";
 import { reopenDoneThread } from "@/lib/mail/done";
-import { canonicalOutboxStatus, type OutboxItem } from "@/lib/mail/outbox";
+import { canonicalOutboxStatus, outboxItemsForThreads, type OutboxItem } from "@/lib/mail/outbox";
+import { deleteOutboundForMailbox } from "./outbound-delete.ts";
 import { linkedThreadState, threadIsHidden } from "@/lib/mail/thread-place";
 import { replyWebhook, syncWebhook } from "@/lib/mail/webhook-body";
 import { deliverConfigured } from "./bridge.server.ts";
@@ -75,19 +76,30 @@ type Overlay = {
   drafts: Map<string, Draft>;
   outbound: OutboundRow[];
   outbox: OutboxItem[];
-  settings: Settings | null;
+  /** Raw mail_settings.spec. Null when the row is absent. */
+  settingsSpec: unknown | null;
+  /** True when the settings row exists, even if the document did not parse. */
+  settingsPresent: boolean;
 };
 
 function asBool(value: unknown): boolean {
   return value === true || value === 1 || value === "t" || value === "true";
 }
 
-function readJson<T>(text: string): T | null {
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    return null;
+function readJson<T>(value: unknown): T | null {
+  let current = value;
+  if (current == null) return null;
+  if (current instanceof Uint8Array) current = new TextDecoder().decode(current);
+  if (typeof current !== "string") return current as T;
+  for (let depth = 0; depth < 2 && typeof current === "string"; depth += 1) {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return null;
+    }
   }
+  if (typeof current === "string") return null;
+  return current as T;
 }
 
 function asLocation(value: string): Location {
@@ -212,13 +224,25 @@ async function readOverlay(): Promise<Overlay | null> {
         status,
         error: row.error,
         createdAt: row.created_at || message.date,
+        providerMessageId: row.provider_message_id,
+        messageId: message.messageId,
       });
     }
 
-    const settingsRows = await sql<{ spec: string }>`select spec from mail_settings where id = 'settings'`;
-    const settings = settingsFromUnknown(settingsRows[0] ? readJson<unknown>(settingsRows[0].spec) : null);
+    const settingsRows = await sql<{ spec: unknown }>`select spec from mail_settings where id = 'settings'`;
+    const settingsRow = settingsRows[0];
 
-    return { threads, hidden, labels: labelsOut, filters, drafts, outbound, outbox, settings };
+    return {
+      threads,
+      hidden,
+      labels: labelsOut,
+      filters,
+      drafts,
+      outbound,
+      outbox,
+      settingsSpec: settingsRow ? settingsRow.spec : null,
+      settingsPresent: Boolean(settingsRow),
+    };
   } catch {
     return null;
   }
@@ -389,7 +413,8 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
 
   threads = foldLoadedThreads(threads, overlay?.threads ?? new Map(), hidden, overlay?.filters ?? [], placeKeys);
 
-  const prefs = overlay?.settings ?? current?.settings ?? defaultSettings();
+  const localSettings = current?.settings ?? defaultSettings();
+  const prefs = overlay?.settingsPresent ? hydrateDisplaySettings(overlay.settingsSpec, localSettings) : localSettings;
   const aliases = identity?.aliases?.length
     ? identity.aliases
     : current?.aliases?.length
@@ -405,7 +430,7 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
         signature: signatureIsCustom ? prefs.signature : signatureFor(identity.displayName, identity.address),
       }
     : prefs;
-  if (overlay && !overlay.settings) await writeSettings(settings);
+  if (overlay && !overlay.settingsPresent) await writeSettings(settings);
   threads = applySenderRules(threads, settings.senderRules);
   return {
     threads,
@@ -416,7 +441,7 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
     gmail: "off",
     hiddenThreadIds: [...hidden],
     settings,
-    outbox: overlay?.outbox ?? current?.outbox ?? [],
+    outbox: outboxItemsForThreads(overlay?.outbox ?? current?.outbox ?? [], threads),
   };
 }
 
@@ -498,6 +523,8 @@ async function persistMailbox(data: MailData): Promise<void> {
           end`;
       }
     }
+
+    await deleteOutboundForMailbox(sql, data.hiddenThreadIds ?? [], data.dropOutboxIds ?? []);
   } catch {
     // Product state stays in memory for this process. Do not log the driver error.
   }

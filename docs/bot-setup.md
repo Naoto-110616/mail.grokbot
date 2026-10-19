@@ -150,14 +150,20 @@ The transition table above still applies. `queued` → `sent` is rejected. `awai
 
 Compose Send keeps writing `mail_outbound`. The wake POST still runs when a webhook is configured. When it is not, there is no "did not wake" failure. The toast is `Queued for approval in Grok Bot`.
 
-The Outbox folder lists every saved send. The drawer count is how many are `queued` or `awaiting_approval` (`waiting` and `pending` count as queued).
+The Outbox folder lists saved sends whose message is still in the mailbox. Delete forever removes the matching `mail_outbound` row. A row whose message is already gone is not listed. The drawer count is how many listed rows are `queued` or `awaiting_approval` (`waiting` and `pending` count as queued).
 
 | Stored status | Label |
 | --- | --- |
 | `queued`, `waiting`, `pending`, `awaiting_approval` | `Waiting for your OK in Grok Bot` |
 | `sent` | `Sent` |
 | `declined` | `Declined` |
-| `failed` | `Failed: <error>` |
+| `failed` | `Failed: <error>`, or `Failed` when the error is blank |
 | `cancelled` | `Cancelled` |
 
 Cancel is shown only for `queued` (including a stored `waiting` or `pending` row). It calls `DELETE /api/outbox/:id`.
+
+## Attachment `content` on ingest
+
+A message attachment, or a loose `kind: "attachment"` item, may include `content`. It is standard base64 (padding required). The app decodes it and stores at most **1 MiB (1,048,576 bytes)**. The stored value is `mail_attachment.content_b64`. `attachments_json` stays metadata only: `id`, `filename`, `mime`, `bytes`, `path`.
+
+Over the cap, blank, or not valid base64: the item is still accepted, the metadata is stored, and the bytes are not. The reader then says `Not downloaded yet` and Download stays off. A later ingest of the same attachment without `content` keeps bytes already stored. With `content` under the cap, Download uses those bytes.

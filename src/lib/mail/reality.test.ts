@@ -9,6 +9,7 @@ import {
   clearDraftThread,
   emptyMailbox,
   hideThreadIds,
+  hydrateDisplaySettings,
   savedDraftThreadId,
   settingsFromUnknown,
   shouldPersistDraft,
@@ -127,6 +128,32 @@ describe("settings and wake copy", () => {
     const server = applyBackendData(current, incoming, { settingsFrom: "server" });
     assert.equal(server.settings.theme, "dim");
     assert.equal(server.settings.density, "compact");
+
+    const local = {
+      ...emptyMailbox().settings,
+      density: "compact" as const,
+      theme: "dim" as const,
+      glass: 12,
+      pane: "none" as const,
+      undoSeconds: 7,
+      vacationOn: true,
+      vacationText: "Away",
+    };
+    assert.equal(hydrateDisplaySettings(null, local).density, "compact");
+    assert.equal(hydrateDisplaySettings(undefined, local).theme, "dim");
+    assert.equal(hydrateDisplaySettings("nope", local).vacationText, "Away");
+    const partial = hydrateDisplaySettings({ theme: "light", glass: 80 }, local);
+    assert.equal(partial.theme, "light");
+    assert.equal(partial.glass, 80);
+    assert.equal(partial.density, "compact");
+    assert.equal(partial.pane, "none");
+    assert.equal(partial.undoSeconds, 7);
+    assert.equal(partial.vacationOn, true);
+    assert.equal(partial.vacationText, "Away");
+    const encoded = hydrateDisplaySettings('{"density":"cozy"}', local);
+    assert.equal(encoded.density, "cozy");
+    assert.equal(encoded.theme, "dim");
+    assert.equal(hydrateDisplaySettings({ theme: "dark" }, local).theme, "lights-out");
   });
 
   it("says message for new mail and reply only for a reply", () => {
@@ -152,10 +179,59 @@ describe("trash follows the send", () => {
     assert.equal(threadIsHidden("thr_msg", messages, new Set(["thread-send"]), keys), true);
     assert.equal(threadIsHidden("thr_other", [{ id: "msg_x" }], new Set(["thread-send"]), keys), false);
 
-    const mailbox = { ...emptyMailbox(), threads: [thread("thr_msg", "trash"), thread("keep")], hiddenThreadIds: ["old"] };
+    const gone = {
+      ...thread("thr_msg", "trash"),
+      messages: [{ ...emptyMessage(), id: "msg_prov-1", clientSendId: "send_1", messageId: "prov-1" }],
+    };
+    const stay = {
+      ...thread("keep"),
+      messages: [{ ...emptyMessage(), id: "msg_keep", clientSendId: "send_keep" }],
+    };
+    const mailbox = {
+      ...emptyMailbox(),
+      threads: [gone, stay],
+      hiddenThreadIds: ["old"],
+      outbox: [
+        {
+          id: "send_1",
+          fromAddress: "you@example.com",
+          to: ["ada@example.com"],
+          cc: [],
+          subject: "Hello",
+          text: "Hello",
+          status: "failed" as const,
+          error: null,
+          createdAt: "2026-10-18T00:00:00.000Z",
+        },
+        {
+          id: "send_keep",
+          fromAddress: "you@example.com",
+          to: ["ada@example.com"],
+          cc: [],
+          subject: "Stay",
+          text: "Hello",
+          status: "queued" as const,
+          error: null,
+          createdAt: "2026-10-18T00:00:00.000Z",
+        },
+        {
+          id: "send_orphan",
+          fromAddress: "you@example.com",
+          to: ["ada@example.com"],
+          cc: [],
+          subject: "Gone",
+          text: "Hello",
+          status: "sent" as const,
+          error: null,
+          createdAt: "2026-10-18T00:00:00.000Z",
+        },
+      ],
+    };
     const hidden = hideThreadIds(mailbox, ["thr_msg"]);
     assert.deepEqual(hidden.threads.map((item) => item.id), ["keep"]);
     assert.deepEqual(hidden.hiddenThreadIds, ["old", "thr_msg"]);
+    assert.deepEqual(hidden.outbox?.map((item) => item.id), ["send_keep"]);
+    assert.deepEqual(hidden.dropOutboxIds, ["send_1", "prov-1"]);
   });
 });
 
@@ -178,14 +254,24 @@ describe("reality wiring", () => {
     const reader = readFileSync(new URL("../../components/mail/reader.tsx", import.meta.url), "utf8");
     const list = readFileSync(new URL("../../components/mail/thread-list.tsx", import.meta.url), "utf8");
     const compose = readFileSync(new URL("../../components/mail/compose.tsx", import.meta.url), "utf8");
+    const css = readFileSync(new URL("../../styles.css", import.meta.url), "utf8");
+    const outboundDelete = readFileSync(new URL("../../server/mail/outbound-delete.ts", import.meta.url), "utf8");
 
     assert.match(server, /mail_settings/);
-    assert.match(server, /settingsFromUnknown/);
+    assert.match(server, /hydrateDisplaySettings/);
+    assert.match(server, /settingsPresent/);
+    assert.match(server, /overlay\?\.settingsPresent \? hydrateDisplaySettings\(overlay\.settingsSpec, localSettings\) : localSettings/);
+    assert.match(server, /!overlay\.settingsPresent/);
+    assert.equal(server.includes("settingsFromUnknown"), false);
     assert.match(server, /withSignature\(request\.body/);
     assert.match(server, /wakeMissNotice\(signed\.mode\)/);
     assert.match(server, /linkedThreadState/);
     assert.match(server, /applyFilters/);
     assert.match(server, /applySenderRules/);
+    assert.match(server, /deleteOutboundForMailbox/);
+    assert.match(server, /outboxItemsForThreads/);
+    assert.match(outboundDelete, /delete from mail_outbound where thread_id = \$1/);
+    assert.match(outboundDelete, /delete from mail_outbound where client_send_id = \$1 or provider_message_id = \$1/);
 
     const between = (start: string, end: string) => {
       const at = store.indexOf(start);
@@ -221,7 +307,13 @@ describe("reality wiring", () => {
     assert.match(reader, /label=\{link.label\} tall/);
     assert.match(reader, /min-h-11/);
     assert.match(reader, /Could not read this file/);
+    assert.match(reader, /Not downloaded yet/);
     assert.match(reader, /This file is ready to download/);
+    assert.match(reader, /mail-inline-link wrap-anywhere inline/);
+    assert.match(reader, /inline-flex min-h-11/);
+    assert.equal(reader.includes("mail-inline-link inline-flex"), false);
+    assert.match(css, /\.mail-inline-link \{[^}]*padding-block: 13px;/);
+    assert.match(css, /\.mail-inline-link \{[^}]*margin-block: -13px;/);
 
     assert.match(list, /aria-label="Done"/);
     assert.match(list, /inline-flex size-11 shrink-0 items-center justify-center rounded-full text-accent/);

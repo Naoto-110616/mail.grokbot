@@ -198,6 +198,7 @@ function dataOf(s: MailData): MailData {
     gmail: s.gmail,
     hiddenThreadIds: s.hiddenThreadIds ?? [],
     outbox: s.outbox ?? [],
+    dropOutboxIds: s.dropOutboxIds ?? [],
   };
 }
 
@@ -916,10 +917,10 @@ export const useMail = create<State>()(
           if (s.folder !== "trash" && s.folder !== "spam") return;
           const snapshot = snapshotOf(dataOf(s));
           const location = s.folder;
-          const hidden = s.threads.filter((thread) => thread.location === location && accountOf(thread) === s.account).map((thread) => thread.id);
+          const ids = s.threads.filter((thread) => thread.location === location && accountOf(thread) === s.account).map((thread) => thread.id);
+          const next = hideThreadIds(dataOf(s), ids);
           set({
-            threads: s.threads.filter((thread) => !(thread.location === location && accountOf(thread) === s.account)),
-            hiddenThreadIds: [...new Set([...(s.hiddenThreadIds ?? []), ...hidden])],
+            ...sliceOf(next),
             openId: null,
             viewing: "list",
             checked: [],
