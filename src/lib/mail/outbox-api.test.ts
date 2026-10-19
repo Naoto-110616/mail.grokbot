@@ -118,6 +118,7 @@ function call(
     cookie?: string;
     session?: OutboxApiDeps["session"];
     env?: { INGEST_TOKEN?: string };
+    now?: () => number;
   } = {},
 ): Promise<Response> {
   const headers = new Headers();
@@ -134,6 +135,7 @@ function call(
       env: extra.env ?? { INGEST_TOKEN: TOKEN },
       sql,
       session: extra.session,
+      now: extra.now,
     },
   );
 }
@@ -161,6 +163,7 @@ async function seed(
     html?: string | null;
     to?: string[];
     cc?: string[];
+    updatedAt?: string | null;
   },
 ): Promise<void> {
   const spec: Record<string, unknown> = {
@@ -182,7 +185,7 @@ async function seed(
       JSON.stringify(spec),
       row.status,
       row.createdAt,
-      row.createdAt,
+      row.updatedAt === undefined ? row.createdAt : row.updatedAt,
       row.replyTo ?? null,
       "thr_ui",
     ],
@@ -541,6 +544,196 @@ describe("outbox api", () => {
       assert.equal(omitted.status, 400);
       const method = await call("POST", "/api/outbox", {}, `Bearer ${TOKEN}`, db.sql);
       assert.equal(method.status, 405);
+
+      const queuedDespiteParam = await call(
+        "GET",
+        "/api/outbox?status=queued&older-than=no",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
+      assert.equal(queuedDespiteParam.status, 200);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("lists awaiting_approval rows older than the window so a sweep can re-hand them", async () => {
+    const closed = throwingSql();
+    const now = Date.parse("2026-10-19T12:00:00.000Z");
+    const clock = { now: () => now };
+    const denied = await call(
+      "GET",
+      "/api/outbox?status=stale&older-than=no",
+      undefined,
+      null,
+      closed.sql,
+      {
+        now: clock.now,
+      },
+    );
+    assert.equal(denied.status, 401);
+    const unset = await call(
+      "GET",
+      "/api/outbox?status=stale",
+      undefined,
+      `Bearer ${TOKEN}`,
+      closed.sql,
+      {
+        env: {},
+        now: clock.now,
+      },
+    );
+    assert.equal(unset.status, 503);
+    assert.equal(closed.opened(), false);
+
+    const db = await database();
+    try {
+      await parentMessage(db.sql);
+      const at = (minutesBefore: number) => new Date(now - minutesBefore * 60_000).toISOString();
+      await seed(db.sql, {
+        id: "send_old",
+        status: "awaiting_approval",
+        createdAt: at(11),
+        updatedAt: at(11),
+        replyTo: "msg_parent",
+        subject: "Held",
+        text: "Still waiting",
+      });
+      await seed(db.sql, {
+        id: "send_older",
+        status: "awaiting_approval",
+        createdAt: at(30),
+        updatedAt: at(30),
+        subject: "Older hold",
+        text: "First",
+      });
+      await seed(db.sql, {
+        id: "send_exact",
+        status: "awaiting_approval",
+        createdAt: at(10),
+        updatedAt: at(10),
+        subject: "Edge",
+        text: "Exactly ten",
+      });
+      await seed(db.sql, {
+        id: "send_fresh",
+        status: "awaiting_approval",
+        createdAt: at(120),
+        updatedAt: at(1),
+        subject: "Just moved",
+        text: "Recent",
+      });
+      await seed(db.sql, {
+        id: "send_queued",
+        status: "queued",
+        createdAt: at(90),
+        updatedAt: at(90),
+        subject: "Still queued",
+        text: "Not approval",
+      });
+      await seed(db.sql, {
+        id: "send_sent",
+        status: "sent",
+        createdAt: at(90),
+        updatedAt: at(90),
+        subject: "Sent",
+        text: "Gone",
+      });
+      await seed(db.sql, {
+        id: "send_blank_updated",
+        status: "awaiting_approval",
+        createdAt: at(240),
+        updatedAt: null,
+        subject: "No updated",
+        text: "Use created",
+      });
+      await seed(db.sql, {
+        id: "send_future",
+        status: "awaiting_approval",
+        createdAt: at(0),
+        updatedAt: new Date(now + 60_000).toISOString(),
+        subject: "Future",
+        text: "Not yet",
+      });
+
+      const response = await call(
+        "GET",
+        "/api/outbox?status=stale",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        clock,
+      );
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("cache-control") ?? "", /no-store/);
+      const body: { id: string; replyTo: { ingestId: string; subject: string } | null }[] =
+        await response.json();
+      assert.deepEqual(
+        body.map((item) => item.id),
+        ["send_blank_updated", "send_older", "send_old"],
+      );
+      assert.deepEqual(body[2]?.replyTo, { ingestId: "msg_parent", subject: "Parent subject" });
+      assert.equal(JSON.stringify(body).includes("hidden-bcc@example.com"), false);
+      assert.equal(JSON.stringify(body).includes('"bcc"'), false);
+
+      const wider = await call(
+        "GET",
+        "/api/outbox?status=stale&older-than=20",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        clock,
+      );
+      assert.deepEqual(
+        ((await wider.json()) as { id: string }[]).map((item) => item.id),
+        ["send_blank_updated", "send_older"],
+      );
+
+      const allPast = await call(
+        "GET",
+        "/api/outbox?status=stale&older-than=0",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        clock,
+      );
+      assert.deepEqual(
+        ((await allPast.json()) as { id: string }[]).map((item) => item.id),
+        ["send_blank_updated", "send_older", "send_old", "send_exact", "send_fresh"],
+      );
+
+      for (const query of [
+        "older-than=no",
+        "older-than=-1",
+        "older-than=10.5",
+        "older-than=",
+        "older-than=00",
+      ]) {
+        const bad = await call(
+          "GET",
+          `/api/outbox?status=stale&${query}`,
+          undefined,
+          `Bearer ${TOKEN}`,
+          db.sql,
+          clock,
+        );
+        assert.equal(bad.status, 400, query);
+      }
+      const wrongCase = await call(
+        "GET",
+        "/api/outbox?status=Stale",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        clock,
+      );
+      assert.equal(wrongCase.status, 400);
+      const cookieOnly = await call("GET", "/api/outbox?status=stale", undefined, null, db.sql, {
+        ...clock,
+        cookie: "gb_session=not-a-session",
+      });
+      assert.equal(cookieOnly.status, 401);
     } finally {
       await db.close();
     }

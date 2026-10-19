@@ -40,23 +40,23 @@ There is no Vercel cron. A Hobby cron runs at most once per day, and a sub-daily
 
 ## Status codes
 
-| Status | When | Body |
-| --- | --- | --- |
-| 200 | The call did what it asked | A JSON array, or `{ "id", "status" }` |
-| 400 | The JSON, query, or status value is not in the contract. `sent` without `providerMessageId` is `400` | `{ "error": "invalid" }` |
-| 401 | The credential for that route is missing or wrong | `{ "error": "unauthorized" }` |
-| 404 | That `id` is not in `mail_outbound` | `{ "error": "not found" }` |
-| 405 | The method is wrong for the path | `{ "error": "method" }` and an `Allow` header |
-| 409 | The id exists and this status move is not allowed | `{ "error": "conflict" }` |
-| 503 | `INGEST_TOKEN` is unset or blank, or the write failed | `{ "error": "unavailable" }` |
+| Status | When                                                                                                 | Body                                          |
+| ------ | ---------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| 200    | The call did what it asked                                                                           | A JSON array, or `{ "id", "status" }`         |
+| 400    | The JSON, query, or status value is not in the contract. `sent` without `providerMessageId` is `400` | `{ "error": "invalid" }`                      |
+| 401    | The credential for that route is missing or wrong                                                    | `{ "error": "unauthorized" }`                 |
+| 404    | That `id` is not in `mail_outbound`                                                                  | `{ "error": "not found" }`                    |
+| 405    | The method is wrong for the path                                                                     | `{ "error": "method" }` and an `Allow` header |
+| 409    | The id exists and this status move is not allowed                                                    | `{ "error": "conflict" }`                     |
+| 503    | `INGEST_TOKEN` is unset or blank, or the write failed                                                | `{ "error": "unavailable" }`                  |
 
 `401` and `503` for a missing or unset token are decided before the database is opened. A cookie that would open the app still gets `401` on the bot routes. A bearer token on cancel still gets `401`.
 
 ## `GET /api/outbox?status=queued`
 
-Bearer token. `status` must be the exact string `queued`. Any other query value, including omitting it, is `400`.
+Bearer token. `status` must be the exact string `queued` or `stale`. Any other query value, including omitting it, is `400`. `older-than` is read only when `status` is `stale`.
 
-`200` is a JSON array, oldest `created_at` first, then id. A database status of `queued`, `waiting`, or `pending` is listed. `awaiting_approval`, `sent`, `declined`, `failed`, and `cancelled` are not.
+`200` for `queued` is a JSON array, oldest `created_at` first, then id. A database status of `queued`, `waiting`, or `pending` is listed. `awaiting_approval`, `sent`, `declined`, `failed`, and `cancelled` are not.
 
 Each item has exactly these fields:
 
@@ -79,6 +79,16 @@ Each item has exactly these fields:
 - `html` is a string only when the stored send has one. Compose leaves it `null`.
 - `replyTo` is `null` when the send is not a reply. `ingestId` is the `mail_message.id` of the message being answered, not its RFC Message-ID. `subject` is that row's subject, or `""` when the row is gone.
 - `bcc` is never a field. A blind copy typed in Compose is dropped and is not in this payload. The wake body has no `bcc` field either.
+
+## `GET /api/outbox?status=stale`
+
+Same bearer token as `queued`. This is how a daily sweep finds drafts that are still waiting on the person.
+
+`200` is a JSON array in the same shape as `queued`. Every row is `awaiting_approval`. The sweep should hand that existing draft back. It should not POST `awaiting_approval` again. That move is only legal from `queued`, and repeating it is `409`.
+
+A row is included when it has been `awaiting_approval` for more than `older-than` minutes. The default is 10. `older-than` is a whole number of minutes from 0 to 99999999. Omit it for 10. A blank, negative, or non-integer value is `400`.
+
+Age is `updated_at`, which is set when the row moves to `awaiting_approval`. A blank `updated_at` falls back to `created_at`. The comparison is strict: a row updated exactly 10 minutes ago is not listed when `older-than` is 10. Oldest first, then id. `queued`, `sent`, `declined`, `failed`, and `cancelled` are not listed.
 
 ## `POST /api/outbox/:id/status`
 
@@ -165,13 +175,13 @@ On that update, an omitted `direction` stays `outbound`, and an omitted `threadH
 
 How `status` is read:
 
-| `send-result` status | Outbox status |
-| --- | --- |
-| `sent`, `approved` | `sent` |
-| `failed`, `rejected`, `error` | `failed` |
-| `declined` | `declined` |
-| `awaiting_approval` | `awaiting_approval` |
-| `queued`, `pending`, `waiting` | `queued` |
+| `send-result` status           | Outbox status       |
+| ------------------------------ | ------------------- |
+| `sent`, `approved`             | `sent`              |
+| `failed`, `rejected`, `error`  | `failed`            |
+| `declined`                     | `declined`          |
+| `awaiting_approval`            | `awaiting_approval` |
+| `queued`, `pending`, `waiting` | `queued`            |
 
 Any other string does not move the row. `approved` is accepted only on this ingest item. It is not a `POST /api/outbox/:id/status` value.
 
@@ -183,14 +193,14 @@ Compose Send writes `mail_outbound` and POSTs the wake when a webhook is saved. 
 
 The Outbox folder lists saved sends whose message is still in the mailbox. Delete forever removes the matching `mail_outbound` row. A row whose message is already gone is not listed. The drawer count is how many listed rows are `queued` or `awaiting_approval` (`waiting` and `pending` count as queued).
 
-| Stored status | Label |
-| --- | --- |
-| `queued`, `waiting`, `pending` | `Sending…` |
-| `awaiting_approval` | `Waiting for your OK in Grok Bot` |
-| `sent` | `Sent` |
-| `declined` | `Declined` |
-| `failed` | `Failed: <error>`, or `Failed` when the error is blank. Retry is shown only here. |
-| `cancelled` | `Cancelled` |
+| Stored status                  | Label                                                                             |
+| ------------------------------ | --------------------------------------------------------------------------------- |
+| `queued`, `waiting`, `pending` | `Sending…`                                                                        |
+| `awaiting_approval`            | `Waiting for your OK in Grok Bot`                                                 |
+| `sent`                         | `Sent`                                                                            |
+| `declined`                     | `Declined`                                                                        |
+| `failed`                       | `Failed: <error>`, or `Failed` when the error is blank. Retry is shown only here. |
+| `cancelled`                    | `Cancelled`                                                                       |
 
 `failed` is the row after the five wakes are used, or after the bot reports `failed`. Retry sets the row back to `queued` and POSTs the wake again. Cancel is shown only for `queued` (including a stored `waiting` or `pending` row). It calls `DELETE /api/outbox/:id`.
 

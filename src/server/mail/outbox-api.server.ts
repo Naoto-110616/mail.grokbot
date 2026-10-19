@@ -19,6 +19,8 @@ export type OutboxApiDeps = {
   sql?: Sql;
   /** App routes only. Bot routes never call this. */
   session?: (request: Request) => Promise<boolean>;
+  /** Clock for the stale-approval window. Defaults to Date.now. */
+  now?: () => number;
 };
 
 type OutboundRow = {
@@ -309,6 +311,45 @@ function botItem(row: OutboundRow, subjects: Map<string, string>) {
   };
 }
 
+const STALE_DEFAULT_MINUTES = 10;
+
+/** Whole minutes, default 10. Blank, negative, and non-integers are invalid. */
+export function staleMinutes(raw: string | null): number | null {
+  if (raw === null) return STALE_DEFAULT_MINUTES;
+  const text = raw.trim();
+  if (!/^(0|[1-9]\d{0,7})$/.test(text)) return null;
+  return Number(text);
+}
+
+function rowMillis(row: { created_at?: string | null; updated_at?: string | null }): number | null {
+  const updated = typeof row.updated_at === "string" ? row.updated_at.trim() : "";
+  const created = typeof row.created_at === "string" ? row.created_at.trim() : "";
+  const raw = updated || created;
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+async function replySubjects(
+  sql: Sql,
+  rows: readonly { reply_to_message_id: string | null }[],
+): Promise<Map<string, string>> {
+  const replyIds = [
+    ...new Set(
+      rows.map((row) => row.reply_to_message_id).filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const subjects = new Map<string, string>();
+  if (replyIds.length === 0) return subjects;
+  const marks = replyIds.map((_, index) => `$${index + 1}`).join(", ");
+  const found = await sql.query<{ id: string; subject: string }>(
+    `select id, subject from mail_message where id in (${marks})`,
+    replyIds,
+  );
+  for (const item of found) subjects.set(item.id, item.subject ?? "");
+  return subjects;
+}
+
 async function listQueued(sql: Sql): Promise<Response> {
   const rows = await sql.query<OutboundRow>(
     `select client_send_id, spec, status, error, reply_to_message_id, thread_key, provider_message_id
@@ -316,23 +357,40 @@ async function listQueued(sql: Sql): Promise<Response> {
      where status in ('queued', 'waiting', 'pending')
      order by created_at asc, client_send_id asc`,
   );
-  const replyIds = [
-    ...new Set(
-      rows.map((row) => row.reply_to_message_id).filter((id): id is string => Boolean(id)),
-    ),
-  ];
-  const subjects = new Map<string, string>();
-  if (replyIds.length > 0) {
-    const marks = replyIds.map((_, index) => `$${index + 1}`).join(", ");
-    const found = await sql.query<{ id: string; subject: string }>(
-      `select id, subject from mail_message where id in (${marks})`,
-      replyIds,
-    );
-    for (const item of found) subjects.set(item.id, item.subject ?? "");
-  }
+  const subjects = await replySubjects(sql, rows);
   return json(
     200,
     rows.map((row) => botItem(row, subjects)),
+  );
+}
+
+type StaleRow = OutboundRow & { created_at: string; updated_at: string | null };
+
+/** awaiting_approval strictly older than cutoffMs. Age uses updated_at, then created_at. */
+async function listStale(sql: Sql, cutoffMs: number): Promise<Response> {
+  const rows = await sql.query<StaleRow>(
+    `select client_send_id, spec, status, error, reply_to_message_id, thread_key, provider_message_id,
+            created_at, updated_at
+     from mail_outbound
+     where status = 'awaiting_approval'`,
+  );
+  const stale = rows
+    .filter((row) => {
+      const ms = rowMillis(row);
+      return ms !== null && ms < cutoffMs;
+    })
+    .sort((a, b) => {
+      const am = rowMillis(a) ?? 0;
+      const bm = rowMillis(b) ?? 0;
+      if (am !== bm) return am - bm;
+      if (a.client_send_id < b.client_send_id) return -1;
+      if (a.client_send_id > b.client_send_id) return 1;
+      return 0;
+    });
+  const subjects = await replySubjects(sql, stale);
+  return json(
+    200,
+    stale.map((row) => botItem(row, subjects)),
   );
 }
 
@@ -421,12 +479,19 @@ export async function handleOutboxApi(
     const denied = authorizeBot(request, deps);
     if (denied) return denied;
     if (method !== "GET") return json(405, { error: "method" }, { allow: "GET" });
-    const status = new URL(request.url).searchParams.get("status");
-    if (status !== "queued") return json(400, { error: "invalid" });
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
+    if (status !== "queued" && status !== "stale") return json(400, { error: "invalid" });
+    const minutes = status === "stale" ? staleMinutes(url.searchParams.get("older-than")) : null;
+    if (status === "stale" && minutes === null) return json(400, { error: "invalid" });
     try {
       const sql = await database(deps);
       await runDueQuiet(sql);
-      return await listQueued(sql);
+      if (status === "queued") return await listQueued(sql);
+      const nowMs = deps.now?.() ?? Date.now();
+      const cutoffMs = nowMs - (minutes ?? STALE_DEFAULT_MINUTES) * 60_000;
+      if (!Number.isFinite(cutoffMs)) return json(400, { error: "invalid" });
+      return await listStale(sql, cutoffMs);
     } catch (err) {
       console.error("[outbox] list failed", err instanceof Error ? err.name : "error");
       return json(503, { error: "unavailable" });

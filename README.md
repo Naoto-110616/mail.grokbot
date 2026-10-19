@@ -75,9 +75,11 @@ The app exposes ingest and the outbox. The bot speaks to the mail provider. Shap
 
 **Outbox webhook.** On send, the app POSTs `{ "action": "send", "clientSendId" }` to the webhook saved in Settings. That body has no subject and no message text. The bot reads `GET /api/outbox?status=queued` and reports what happened with `POST /api/outbox/:id/status`. Check mail POSTs `{ "action": "sync", "after" }`. A wake that does not return HTTP 200 is retried after 0s, 30s, 2m, 10m, and 1h, on the next request that loads the mailbox or calls ingest or outbox. The app has no cron.
 
+**Stale approval.** `GET /api/outbox?status=stale` uses the same bearer token. It lists sends still `awaiting_approval` for more than 10 minutes, oldest first, in the same shape as the queued list. `older-than` is an optional whole number of minutes (default 10). A blank, negative, or non-integer `older-than` is 400. Any other `status` is 400. A daily sweep can hand those drafts back to the person. They are already awaiting approval, so the sweep does not post `awaiting_approval` again.
+
 **Live delivery.** The bot should listen for new mail and `POST` it to ingest as it arrives. The app does not open that listener.
 
-**Daily catch-up.** The bot should sweep once a day for mail the live listener missed, then `POST` it to ingest. The app does not run that sweep. The sample outbox row is not listed by `GET /api/outbox` and is not delivered.
+**Daily catch-up.** The bot should sweep once a day for mail the live listener missed, then `POST` it to ingest. The same sweep can `GET /api/outbox?status=stale` and re-hand approvals that have been waiting. The app does not run that sweep. The sample outbox row is not listed by `GET /api/outbox` and is not delivered.
 
 ```sh
 node bot/convert-ingest.mjs message.eml > items.json
