@@ -6,9 +6,26 @@ With no `DATABASE_URL`, or with `GBM_DEMO=1`, the app shows invented mail at `yo
 
 ## Deploy on Vercel with Neon
 
+Neon is required for real mail. Without a Neon database, the app shows sample mail only.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FPhillipHolland%2Fmail.grokbot&env=GBM_SITE_PASSWORD,GBM_SESSION_SECRET,GBM_INGEST_TOKEN,GBM_INBOX_ADDRESS,GBM_OWNER_NAME,GBM_TAGS&envDescription=GBM_SITE_PASSWORD%20locks%20the%20site.%20GBM_SESSION_SECRET%20signs%20the%20session%20cookie.%20GBM_INGEST_TOKEN%20is%20the%20bearer%20token%20for%20ingest%20and%20the%20outbox.%20GBM_INBOX_ADDRESS%20is%20the%20mailbox%20address.%20GBM_OWNER_NAME%20is%20the%20name%20on%20sent%20mail.%20GBM_TAGS%20lists%20plus-tags%20such%20as%20ops%2Cbooks%3AReading.&envLink=https%3A%2F%2Fgithub.com%2FPhillipHolland%2Fmail.grokbot%23deploy-on-vercel-with-neon&project-name=grokbot-mail&repository-name=grokbot-mail&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%7D%5D)
+
+The button clones this repo and asks for these variables. It also adds Neon. Neon sets `DATABASE_URL` (pooled) and `DATABASE_URL_UNPOOLED` (direct). Migrations prefer the direct string. Do not commit either string. Skipping Neon leaves the deployed app on sample mail only.
+
+| Variable             | Description                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| `GBM_SITE_PASSWORD`  | Password that locks the mailbox.                                                   |
+| `GBM_SESSION_SECRET` | Secret that signs the session cookie.                                              |
+| `GBM_INGEST_TOKEN`   | Bearer token for ingest and the outbox routes.                                    |
+| `GBM_INBOX_ADDRESS`  | Mailbox address, such as `you@example.com`.                                        |
+| `GBM_OWNER_NAME`     | Name shown for that mailbox.                                                       |
+| `GBM_TAGS`           | Plus-tags, comma-separated. A label may follow a colon, as in `ops,books:Reading`. |
+
+To deploy without the button:
+
 1. Import this repo into a Vercel project you own.
 2. Create a Neon Postgres database. Put its pooled connection string in `DATABASE_URL`. Put the direct string in `DATABASE_URL_UNPOOLED` so migrations can run. The provider includes the credentials in that string. Do not commit it.
-3. Set the variables below in the Vercel project. Names and placeholders are in `.env.example`.
+3. Set the variables above in the Vercel project. Names and placeholders are in `.env.example`.
 4. The build command is `npm run build`. Migrations run during the build when `DATABASE_URL` is set.
 
 Leave `GBM_DEMO` unset on a real mailbox. `GBM_DEMO=1` replaces it with the sample inbox and does not write to Postgres.
