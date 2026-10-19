@@ -47,7 +47,7 @@ Older names still work. When both are set, the `GBM_` name wins.
 
 The default signature is the display name and address from that identity. Webhook URL and key are saved in Settings, not in env. The key is write-only.
 
-Bot scripts also read `GBM_APP_ORIGIN`, `GBM_INGEST_URL`, `GBM_INGEST_PATH`, and `GBM_INGEST_FILE`. The token stays in the environment and is never written to a file.
+Bot scripts also read `GBM_APP_ORIGIN`, `GBM_INGEST_URL`, `GBM_INGEST_PATH`, and `GBM_INGEST_FILE`. The bot keeps the ingest token in `~/.config/grokbot-mail/` with chmod 600 and never prints it.
 
 ### Self-host
 

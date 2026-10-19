@@ -2,7 +2,8 @@
 /**
  * POST an ingest JSON file to the app.
  * The URL comes from GBM_INGEST_URL, or GBM_APP_ORIGIN plus GBM_INGEST_PATH.
- * The bearer token comes from GBM_INGEST_TOKEN or INGEST_TOKEN. It is never written to a file.
+ * The bearer token comes from GBM_INGEST_TOKEN or INGEST_TOKEN.
+ * The bot keeps it in ~/.config/grokbot-mail/ with chmod 600 and never prints it.
  *
  *   node bot/push-ingest.mjs items.json
  */
@@ -91,7 +92,7 @@ function usage() {
     "Set GBM_INGEST_URL, or GBM_APP_ORIGIN and optional GBM_INGEST_PATH (default /api/ingest).",
   );
   console.error(
-    "Set GBM_INGEST_TOKEN or INGEST_TOKEN in the environment. The token is not written to a file.",
+    "Set GBM_INGEST_TOKEN or INGEST_TOKEN. The bot keeps it in ~/.config/grokbot-mail/ with chmod 600 and never prints it.",
   );
 }
 
