@@ -53,7 +53,8 @@ async function waitForHttp(url, child, timeoutMs) {
   const started = Date.now();
   let last = "no response";
   while (Date.now() - started < timeoutMs) {
-    if (child.exitCode != null) throw new Error(`dev server exited (${child.exitCode}) before ${url} answered`);
+    if (child.exitCode != null)
+      throw new Error(`dev server exited (${child.exitCode}) before ${url} answered`);
     try {
       const response = await fetch(url, { redirect: "manual" });
       if (response.status > 0) return;
@@ -177,11 +178,21 @@ export async function runWidthCheck() {
   env.MAIL_LOCALHOST_GATE = "open";
   env.DATABASE_URL = "";
   env.DATABASE_URL_UNPOOLED = "";
+  env.GBM_DEMO = "0";
   env.INGEST_TOKEN = INGEST_TOKEN;
   const logFd = openSync("/tmp/ios-width-vite.log", "w");
   const child = spawn(
     process.execPath,
-    ["scripts/with-app-env.mjs", "vite", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    [
+      "scripts/with-app-env.mjs",
+      "vite",
+      "dev",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--strictPort",
+    ],
     { cwd: root, env, detached: true, stdio: ["ignore", logFd, logFd] },
   );
   held.child = child;

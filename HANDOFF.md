@@ -39,7 +39,7 @@ Messages are grouped by `Message-ID`, `In-Reply-To`, and `References`. A reply-s
 }
 ```
 
-The mailbox reads rows delivered by `POST /api/ingest`. Check mail and send still wake the bot with the webhook. An empty database shows no sample threads.
+The mailbox reads rows delivered by `POST /api/ingest`. Check mail and send still wake the bot with the webhook. With no database, or with `GBM_DEMO=1`, the app shows sample mail. `GBM_DEMO=0` keeps an empty mailbox until ingest.
 
 Identity comes from an ingest `account` item when one exists, otherwise from this config.
 

@@ -21,6 +21,7 @@ import {
   type SecurityState,
 } from "./gate.ts";
 import { handleSiteRequest } from "./handle.server.ts";
+import { resetDemoMailbox } from "../../server/mail/demo-state.server.ts";
 import { localhostGateOpen } from "./localhost-gate.ts";
 import { GATE_COPY } from "./messages.ts";
 import { LOGIN_NEXT_FIELD, LOGIN_PASSWORD_FIELD } from "./paths.ts";
@@ -30,7 +31,9 @@ const SECRET = "test-session-secret";
 const APP_PASSWORD = "env-password";
 const NOW = 1_700_000_000_000;
 
-function memoryDeps(initial: SecurityState = { passwordHash: null, sessionVersion: 0 }): GateDeps & {
+function memoryDeps(
+  initial: SecurityState = { passwordHash: null, sessionVersion: 0 },
+): GateDeps & {
   read: () => SecurityState;
 } {
   let state = initial;
@@ -146,7 +149,11 @@ describe("site gate", () => {
   it("keeps a deep link across the login redirect and rejects an off-site next", async () => {
     const deps = memoryDeps();
     const ctx = { handlerType: "router" as const, dev: false };
-    const message = await handleGate(get("/m/msg_859543"), { ...ctx, pathname: "/m/msg_859543" }, deps);
+    const message = await handleGate(
+      get("/m/msg_859543"),
+      { ...ctx, pathname: "/m/msg_859543" },
+      deps,
+    );
     assert.equal(message?.status, 302);
     assert.equal(message?.headers.get("location"), "/login?next=%2Fm%2Fmsg_859543");
     const thread = await handleGate(
@@ -177,9 +184,17 @@ describe("site gate", () => {
     assert.equal(signedIn?.status, 303);
     assert.equal(signedIn?.headers.get("location"), "/m/msg_859543");
     const cookie = `${SESSION_COOKIE}=${tokenFrom(signedIn!)}`;
-    const opened = await handleGate(get("/m/msg_859543", cookie), { ...ctx, pathname: "/m/msg_859543" }, deps);
+    const opened = await handleGate(
+      get("/m/msg_859543", cookie),
+      { ...ctx, pathname: "/m/msg_859543" },
+      deps,
+    );
     assert.equal(opened, null);
-    const openedOutbox = await handleGate(get("/o/send_1", cookie), { ...ctx, pathname: "/o/send_1" }, deps);
+    const openedOutbox = await handleGate(
+      get("/o/send_1", cookie),
+      { ...ctx, pathname: "/o/send_1" },
+      deps,
+    );
     assert.equal(openedOutbox, null);
     const already = await handleGate(
       get("/login?next=%2Ft%2Fthr_a_example_test", cookie),
@@ -189,8 +204,17 @@ describe("site gate", () => {
     assert.equal(already?.status, 302);
     assert.equal(already?.headers.get("location"), "/t/thr_a_example_test");
 
-    for (const next of ["https://evil.example/phish", "//evil.example", "/\\evil.example", "/login"]) {
-      const response = await handleGate(loginRequest(APP_PASSWORD, next), { ...ctx, pathname: "/login" }, deps);
+    for (const next of [
+      "https://evil.example/phish",
+      "//evil.example",
+      "/\\evil.example",
+      "/login",
+    ]) {
+      const response = await handleGate(
+        loginRequest(APP_PASSWORD, next),
+        { ...ctx, pathname: "/login" },
+        deps,
+      );
       assert.equal(response?.headers.get("location"), "/", next);
     }
   });
@@ -328,14 +352,27 @@ describe("site gate", () => {
   it("exempts only /api/ingest from the cookie gate", async () => {
     const deps = memoryDeps();
     const ctx = { handlerType: "router" as const, dev: false };
-    assert.equal(await handleGate(get("/api/ingest"), { ...ctx, pathname: "/api/ingest" }, deps), null);
-    assert.equal(await handleGate(get("/api/ingest/state"), { ...ctx, pathname: "/api/ingest/state" }, deps), null);
-    assert.equal(await handleGate(get("/api/ingest/other"), { ...ctx, pathname: "/api/ingest/other" }, deps), null);
+    assert.equal(
+      await handleGate(get("/api/ingest"), { ...ctx, pathname: "/api/ingest" }, deps),
+      null,
+    );
+    assert.equal(
+      await handleGate(get("/api/ingest/state"), { ...ctx, pathname: "/api/ingest/state" }, deps),
+      null,
+    );
+    assert.equal(
+      await handleGate(get("/api/ingest/other"), { ...ctx, pathname: "/api/ingest/other" }, deps),
+      null,
+    );
     const other = await handleGate(get("/api/other"), { ...ctx, pathname: "/api/other" }, deps);
     assert.equal(other?.status, 302);
     const mail = await handleGate(get("/api/mail"), { ...ctx, pathname: "/api/mail" }, deps);
     assert.equal(mail?.status, 302);
-    const fn = await handleGate(get("/api/ingest"), { pathname: "/api/ingest", handlerType: "serverFn", dev: false }, deps);
+    const fn = await handleGate(
+      get("/api/ingest"),
+      { pathname: "/api/ingest", handlerType: "serverFn", dev: false },
+      deps,
+    );
     assert.equal(fn?.status, 401);
   });
 
@@ -350,8 +387,14 @@ describe("site gate", () => {
     const hash = await hashPassword(password);
     assert.equal(hash.startsWith("scrypt$"), true);
     assert.equal(hash.includes(password), false);
-    assert.equal(await checkPassword(password, { passwordHash: hash, sessionVersion: 1 }, "other"), "match");
-    assert.equal(await checkPassword("other", { passwordHash: hash, sessionVersion: 1 }, "other"), "miss");
+    assert.equal(
+      await checkPassword(password, { passwordHash: hash, sessionVersion: 1 }, "other"),
+      "match",
+    );
+    assert.equal(
+      await checkPassword("other", { passwordHash: hash, sessionVersion: 1 }, "other"),
+      "miss",
+    );
   });
 
   it("posts the password field name the server reads", () => {
@@ -360,7 +403,10 @@ describe("site gate", () => {
     assert.match(source, /name=\{LOGIN_NEXT_FIELD\}/);
     assert.equal(LOGIN_PASSWORD_FIELD, "password");
     assert.equal(LOGIN_NEXT_FIELD, "next");
-    const settings = readFileSync(new URL("../../components/mail/overlays.tsx", import.meta.url), "utf8");
+    const settings = readFileSync(
+      new URL("../../components/mail/overlays.tsx", import.meta.url),
+      "utf8",
+    );
     assert.match(settings, /GATE_COPY\.needsDatabase/);
   });
 
@@ -445,6 +491,8 @@ describe("site gate without a database", () => {
     "INGEST_TOKEN",
     "NODE_ENV",
     "MAIL_LOCALHOST_GATE",
+    "GBM_DEMO",
+    "GBM_SITE_PASSWORD",
   ] as const;
   const previous = Object.fromEntries(envKeys.map((key) => [key, process.env[key]])) as Record<
     (typeof envKeys)[number],
@@ -580,7 +628,10 @@ describe("site gate without a database", () => {
   it("uses the app database client and skips PGLite when DATABASE_URL is set", () => {
     const store = readFileSync(new URL("./store.server.ts", import.meta.url), "utf8");
     const db = readFileSync(new URL("../db.ts", import.meta.url), "utf8");
-    const settings = readFileSync(new URL("../../components/mail/overlays.tsx", import.meta.url), "utf8");
+    const settings = readFileSync(
+      new URL("../../components/mail/overlays.tsx", import.meta.url),
+      "utf8",
+    );
     assert.match(store, /await import\("\.\.\/db\.ts"\)/);
     assert.doesNotMatch(store, /pglite|PGlite|@electric-sql\/pglite/);
     assert.match(db, /dbSource === "neon" \? createNeonSql\(\) : createPgliteSql\(\)/);
@@ -594,36 +645,73 @@ describe("site gate without a database", () => {
 
   it("keeps the password gate in production, including loopback with the dev flag", async () => {
     assert.equal(
-      localhostGateOpen({ nodeEnv: "production", flag: "open", urlHost: "127.0.0.1", headerHost: "127.0.0.1" }),
+      localhostGateOpen({
+        nodeEnv: "production",
+        flag: "open",
+        urlHost: "127.0.0.1",
+        headerHost: "127.0.0.1",
+      }),
       false,
     );
     assert.equal(
-      localhostGateOpen({ nodeEnv: "production", flag: "open", urlHost: "localhost", headerHost: null }),
+      localhostGateOpen({
+        nodeEnv: "production",
+        flag: "open",
+        urlHost: "localhost",
+        headerHost: null,
+      }),
       false,
     );
     assert.equal(
-      localhostGateOpen({ nodeEnv: "development", flag: "open", urlHost: "127.0.0.1:9", headerHost: "127.0.0.1:9" }),
+      localhostGateOpen({
+        nodeEnv: "development",
+        flag: "open",
+        urlHost: "127.0.0.1:9",
+        headerHost: "127.0.0.1:9",
+      }),
       true,
     );
     assert.equal(
-      localhostGateOpen({ nodeEnv: "development", flag: "open", urlHost: "mail.example", headerHost: "127.0.0.1" }),
+      localhostGateOpen({
+        nodeEnv: "development",
+        flag: "open",
+        urlHost: "mail.example",
+        headerHost: "127.0.0.1",
+      }),
       false,
     );
     assert.equal(
-      localhostGateOpen({ nodeEnv: "development", flag: "open", urlHost: "127.0.0.1", headerHost: "mail.example" }),
+      localhostGateOpen({
+        nodeEnv: "development",
+        flag: "open",
+        urlHost: "127.0.0.1",
+        headerHost: "mail.example",
+      }),
       false,
     );
     assert.equal(
-      localhostGateOpen({ nodeEnv: "development", flag: "yes", urlHost: "127.0.0.1", headerHost: "127.0.0.1" }),
+      localhostGateOpen({
+        nodeEnv: "development",
+        flag: "yes",
+        urlHost: "127.0.0.1",
+        headerHost: "127.0.0.1",
+      }),
       false,
     );
     assert.equal(
-      localhostGateOpen({ nodeEnv: undefined, flag: "open", urlHost: "127.0.0.1", headerHost: "127.0.0.1" }),
+      localhostGateOpen({
+        nodeEnv: undefined,
+        flag: "open",
+        urlHost: "127.0.0.1",
+        headerHost: "127.0.0.1",
+      }),
       false,
     );
 
     process.env.MAIL_LOCALHOST_GATE = "open";
+    process.env.GBM_DEMO = "0";
     delete process.env.APP_PASSWORD;
+    delete process.env.GBM_SITE_PASSWORD;
     delete process.env.SESSION_SECRET;
     try {
       process.env.NODE_ENV = "production";
@@ -659,12 +747,14 @@ describe("site gate without a database", () => {
   it("rejects ingest when INGEST_TOKEN is unset and does not open a database", async () => {
     delete process.env.DATABASE_URL;
     delete process.env.INGEST_TOKEN;
+    delete process.env.GBM_SITE_PASSWORD;
+    process.env.GBM_DEMO = "0";
     assert.equal(pgliteStarted(), false);
     const post = await handleSiteRequest({
       request: new Request("https://mail.example/api/ingest", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{\"items\":[]}",
+        body: '{"items":[]}',
       }),
       pathname: "/api/ingest",
       handlerType: "router",
@@ -689,6 +779,8 @@ describe("site gate without a database", () => {
   it("answers /api/outbox with JSON and does not redirect to login", async () => {
     delete process.env.DATABASE_URL;
     delete process.env.INGEST_TOKEN;
+    delete process.env.GBM_SITE_PASSWORD;
+    process.env.GBM_DEMO = "0";
     assert.equal(pgliteStarted(), false);
     const queued = await handleSiteRequest({
       request: new Request("https://mail.example/api/outbox?status=queued", {
@@ -734,5 +826,81 @@ describe("site gate without a database", () => {
     assert.equal(cancel?.headers.get("location"), null);
     assert.deepEqual(await cancel?.json(), { error: "unauthorized" });
     assert.equal(pgliteStarted(), false);
+  });
+
+  it("opens the sample inbox when no database and no password are set", async () => {
+    delete process.env.DATABASE_URL;
+    delete process.env.APP_PASSWORD;
+    delete process.env.GBM_SITE_PASSWORD;
+    delete process.env.SESSION_SECRET;
+    delete process.env.GBM_DEMO;
+    resetDemoMailbox();
+    const home = await handleSiteRequest({
+      request: get("/"),
+      pathname: "/",
+      handlerType: "router",
+    });
+    assert.equal(home, null);
+    const preview = await handleSiteRequest({
+      request: get("/api/demo"),
+      pathname: "/api/demo",
+      handlerType: "router",
+    });
+    assert.equal(preview?.status, 200);
+    const body = (await preview?.json()) as {
+      sample?: boolean;
+      note?: string;
+      subjects?: string[];
+    };
+    assert.equal(body.sample, true);
+    assert.ok(body.subjects?.includes("Saturday picnic"));
+    assert.match(body.note ?? "", /example\.com/);
+    assert.equal(pgliteStarted(), false);
+  });
+
+  it("keeps the sample inbox behind a password and hides it when demo mode is off", async () => {
+    delete process.env.DATABASE_URL;
+    delete process.env.GBM_DEMO;
+    delete process.env.GBM_SITE_PASSWORD;
+    process.env.APP_PASSWORD = APP_PASSWORD;
+    process.env.SESSION_SECRET = SECRET;
+    const locked = await handleSiteRequest({
+      request: get("/api/demo"),
+      pathname: "/api/demo",
+      handlerType: "router",
+    });
+    assert.equal(locked?.status, 302);
+    process.env.GBM_DEMO = "0";
+    delete process.env.APP_PASSWORD;
+    const hidden = await handleSiteRequest({
+      request: get("/api/demo"),
+      pathname: "/api/demo",
+      handlerType: "router",
+    });
+    assert.equal(hidden?.status, 404);
+    const home = await handleSiteRequest({
+      request: get("/"),
+      pathname: "/",
+      handlerType: "router",
+    });
+    assert.equal(home?.status, 302);
+  });
+
+  it("cancels a sample outbox row without a session when demo mode is open", async () => {
+    delete process.env.DATABASE_URL;
+    delete process.env.APP_PASSWORD;
+    delete process.env.GBM_SITE_PASSWORD;
+    delete process.env.GBM_DEMO;
+    delete process.env.INGEST_TOKEN;
+    resetDemoMailbox();
+    const cancel = await handleSiteRequest({
+      request: new Request("https://mail.example/api/outbox/send_demo_1", { method: "DELETE" }),
+      pathname: "/api/outbox/send_demo_1",
+      handlerType: "router",
+    });
+    assert.equal(cancel?.status, 200);
+    assert.deepEqual(await cancel?.json(), { id: "send_demo_1", status: "cancelled" });
+    assert.equal(pgliteStarted(), false);
+    resetDemoMailbox();
   });
 });

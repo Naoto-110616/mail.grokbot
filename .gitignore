@@ -5,7 +5,8 @@ node_modules/
 .github_repo
 .env
 .env.*
-.vercel/output
+!.env.example
+.vercel/
 data/config.json
 data/outbox.log
 data/ingest/**

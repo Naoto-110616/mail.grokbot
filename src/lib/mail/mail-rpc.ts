@@ -9,13 +9,22 @@ import { demoPublicConfig, type PublicMailConfig } from "@/lib/mail/public-confi
  * Browser entry for the bot bridge. Handlers dynamic-import server modules so
  * the webhook URL and key never join this module's client graph.
  */
-export const fetchPublicMailConfig = createServerFn({ method: "GET" }).handler(async (): Promise<PublicMailConfig> => {
-  const { publicMailConfig } = await import("@/server/mail/config.server");
-  return publicMailConfig();
-});
+export const fetchPublicMailConfig = createServerFn({ method: "GET" }).handler(
+  async (): Promise<PublicMailConfig> => {
+    const { publicMailConfig } = await import("@/server/mail/config.server");
+    return publicMailConfig();
+  },
+);
 
-function connectionInput(input: unknown): { webhookUrl: string; webhookKey: string; headerMode: HeaderMode } {
-  const row = input && typeof input === "object" ? (input as { webhookUrl?: unknown; webhookKey?: unknown; headerMode?: unknown }) : {};
+function connectionInput(input: unknown): {
+  webhookUrl: string;
+  webhookKey: string;
+  headerMode: HeaderMode;
+} {
+  const row =
+    input && typeof input === "object"
+      ? (input as { webhookUrl?: unknown; webhookKey?: unknown; headerMode?: unknown })
+      : {};
   return {
     webhookUrl: typeof row.webhookUrl === "string" ? row.webhookUrl : "",
     webhookKey: typeof row.webhookKey === "string" ? row.webhookKey : "",
@@ -36,10 +45,12 @@ export const saveBotConnection = createServerFn({ method: "POST" })
     return save(data);
   });
 
-export const pingBotConnection = createServerFn({ method: "POST" }).handler(async (): Promise<{ status: number | null; reason: string | null }> => {
-  const { pingBot } = await import("@/server/mail/bridge.server");
-  return pingBot();
-});
+export const pingBotConnection = createServerFn({ method: "POST" }).handler(
+  async (): Promise<{ status: number | null; reason: string | null }> => {
+    const { pingBot } = await import("@/server/mail/bridge.server");
+    return pingBot();
+  },
+);
 
 export const retryOutboxSend = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
@@ -77,7 +88,11 @@ export const bridgeSync = createServerFn({ method: "POST" })
 export const bridgeAct = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     const row = input as { data?: unknown; kind?: unknown; ids?: unknown };
-    return { data: asMail(row?.data), kind: row?.kind as ActKind, ids: Array.isArray(row?.ids) ? (row.ids as string[]) : [] };
+    return {
+      data: asMail(row?.data),
+      kind: row?.kind as ActKind,
+      ids: Array.isArray(row?.ids) ? (row.ids as string[]) : [],
+    };
   })
   .handler(async ({ data }) => {
     const { actMailbox } = await import("@/server/mail/store.server");
@@ -116,7 +131,11 @@ export const bridgeSaveDraft = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     const row = input as { data?: unknown; draft?: Draft; threadId?: unknown };
     if (!row?.draft || typeof row.draft !== "object") throw new Error("invalid mail data");
-    return { data: asMail(row.data), draft: row.draft, threadId: typeof row.threadId === "string" ? row.threadId : null };
+    return {
+      data: asMail(row.data),
+      draft: row.draft,
+      threadId: typeof row.threadId === "string" ? row.threadId : null,
+    };
   })
   .handler(async ({ data }) => {
     const { saveDraftMailbox } = await import("@/server/mail/store.server");
@@ -137,7 +156,8 @@ export const bridgeSend = createServerFn({ method: "POST" })
 export const bridgeReadAttachment = createServerFn({ method: "POST" })
   .validator((input: unknown) => {
     const row = input as Partial<Attachment> | null;
-    if (!row || typeof row.path !== "string" || typeof row.filename !== "string") throw new Error("invalid mail data");
+    if (!row || typeof row.path !== "string" || typeof row.filename !== "string")
+      throw new Error("invalid mail data");
     return {
       id: typeof row.id === "string" ? row.id : "file",
       filename: row.filename,
@@ -154,3 +174,19 @@ export const bridgeReadAttachment = createServerFn({ method: "POST" })
 export function publicConfigFallback(): PublicMailConfig {
   return demoPublicConfig();
 }
+
+export type DemoPreview = {
+  sample: boolean;
+  note: string;
+  subjects: string[];
+};
+
+/** First paint for sample mail. Empty when the database mailbox is in use. */
+export const fetchDemoPreview = createServerFn({ method: "GET" }).handler(
+  async (): Promise<DemoPreview> => {
+    const { demoMode } = await import("@/lib/env.server");
+    if (!demoMode()) return { sample: false, note: "", subjects: [] };
+    const { demoPreview } = await import("@/lib/mail/demo-mailbox");
+    return demoPreview();
+  },
+);

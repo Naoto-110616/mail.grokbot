@@ -81,6 +81,9 @@ describe("quick replies", () => {
     assert.equal(request.attachments.length, 0);
     assert.ok(request.body.startsWith("👋 Thanks for the note."));
     assert.ok(request.body.includes("You\nyou@example.test"));
+    const separator = request.body.indexOf("You\nyou@example.test");
+    const wrote = request.body.indexOf("wrote:");
+    assert.ok(separator > 0 && wrote > separator);
     assert.equal(request.body.includes("smtp"), false);
   });
 
@@ -209,9 +212,9 @@ describe("quick replies", () => {
       })],
     })), true);
     for (const from of [
-      { name: "BotBagger", email: "alerts@example.com" },
+      { name: "WatchBot", email: "alerts@example.com" },
       { name: "Disk Alert", email: "ops@example.com" },
-      { name: "Ada", email: "botbagger@example.com" },
+      { name: "Ada", email: "watchbot@example.com" },
       { name: "Queue", email: "alert@example.com" },
     ]) {
       const row = thread({ id: from.email, messages: [message({ id: "m", from })] });

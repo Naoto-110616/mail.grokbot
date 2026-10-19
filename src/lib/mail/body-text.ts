@@ -355,11 +355,14 @@ function linkOnlyLine(line: string): { href: string; label: string }[] | null {
 function findHiddenCut(lines: string[]): number | null {
   let cut: number | null = null;
   for (let i = 0; i < lines.length; i++) {
-    if (isSignatureDelimiter(lines[i] ?? "") || isWroteLine(lines[i] ?? "")) {
+    const line = lines[i] ?? "";
+    if (isSignatureDelimiter(line)) {
       cut = i;
       break;
     }
-    if (isSentFromLine(lines[i] ?? "") && restIsShort(lines, i)) {
+    // A wrote-line collapses the quote only when the rest of the message is that quote.
+    // Prose after the quote stays on screen.
+    if (isWroteLine(line) && tailIsQuotedRegion(lines, i)) {
       cut = i;
       break;
     }
@@ -377,20 +380,33 @@ function findHiddenCut(lines: string[]): number | null {
       if (isQuoteLine(lines[j] ?? "")) at = j;
       j -= 1;
     }
+    if (j >= 0 && isWroteLine(lines[j] ?? "")) at = j;
     cut = at;
   }
   const hidden = lines.slice(cut).some((line) => line.trim() !== "");
   if (!hidden) return null;
-  // A leading `--`, or a message that is only a quote, must stay visible.
+  // A signature-only body, a bare `--`, or a message that is only a quote stays visible.
   if (!linesHaveProse(lines.slice(0, cut))) return null;
   return cut;
 }
 
 function linesHaveProse(lines: string[]): boolean {
-  return lines.some((line) => {
-    const trimmed = line.trim();
-    return trimmed !== "" && !isSignatureDelimiter(trimmed);
-  });
+  return lines.some((line) => line.trim() !== "" && line !== "-- ");
+}
+
+/** Lines after a wrote-line are the quote, not a later paragraph. */
+function tailIsQuotedRegion(lines: string[], index: number): boolean {
+  let sawQuote = false;
+  for (let i = index + 1; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.trim() === "") continue;
+    if (isQuoteLine(line)) {
+      sawQuote = true;
+      continue;
+    }
+    return false;
+  }
+  return sawQuote;
 }
 
 function trailingQuoteStart(lines: string[]): number | null {
@@ -415,27 +431,18 @@ function tailIsQuote(lines: string[], quoteAt: number, cut: number | null): bool
   return true;
 }
 
-function restIsShort(lines: string[], index: number): boolean {
-  const rest = lines.slice(index + 1).map((line) => line.trim()).filter(Boolean);
-  return rest.length <= 5 && rest.every((line) => line.length <= 80);
-}
-
 function isQuoteLine(line: string): boolean {
   return /^>+/.test(line);
 }
 
+/** Standard signature separator only. `--` without the space stays in the body. */
 function isSignatureDelimiter(line: string): boolean {
-  return /^(?:--|—|–)\s*$/.test(line.trim());
+  return line === "-- ";
 }
 
 function isWroteLine(line: string): boolean {
   const trimmed = line.trim();
   return trimmed.length <= 240 && /^on\s+\S.+\bwrote:\s*$/i.test(trimmed);
-}
-
-function isSentFromLine(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed.length <= 60 && /^sent from\b/i.test(trimmed);
 }
 
 function takePhrase(pending: string): { rest: string; label: string | null } {

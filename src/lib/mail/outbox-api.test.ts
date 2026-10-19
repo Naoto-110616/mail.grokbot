@@ -12,11 +12,25 @@ import type { Sql } from "../db.ts";
 import { SESSION_COOKIE, sessionAllowed, signSession, type GateDeps } from "../site-gate/gate.ts";
 import { handleIngestApi, upsertMessage } from "../../server/mail/ingest-api.server.ts";
 import { threadsFromMessages } from "../../server/mail/ingest.server.ts";
-import { loadMailConfig, saveMailboxConnection, toPublicConfig } from "../../server/mail/config.server.ts";
-import { handleOutboxApi, transitionOutbound, type OutboxApiDeps } from "../../server/mail/outbox-api.server.ts";
+import {
+  loadMailConfig,
+  saveMailboxConnection,
+  toPublicConfig,
+} from "../../server/mail/config.server.ts";
+import {
+  handleOutboxApi,
+  transitionOutbound,
+  type OutboxApiDeps,
+} from "../../server/mail/outbox-api.server.ts";
 import { recordWakeResult, requeueFailedSend, runDueWakes } from "../../server/mail/wake.server.ts";
 import { deleteOutboundForMailbox } from "../../server/mail/outbound-delete.ts";
-import { QUEUED_TOAST, outboxEditAsDraftAllowed, outboxItemsForThreads, outboxStatusLabel, sentCopyForOutbox } from "./outbox.ts";
+import {
+  QUEUED_TOAST,
+  outboxEditAsDraftAllowed,
+  outboxItemsForThreads,
+  outboxStatusLabel,
+  sentCopyForOutbox,
+} from "./outbox.ts";
 import { WAKE_LEASE_MS } from "./wake-retry.ts";
 import { emptyMailbox, inFolder, type Message } from "./model.ts";
 
@@ -24,7 +38,16 @@ const TOKEN = "outbox-test-token";
 const SECRET = "outbox-session-secret";
 const NOW = 1_700_000_000_000;
 const WAKE_FAILURE = "Grok Bot did not wake. This reply was not sent.";
-const STORED = ["queued", "waiting", "pending", "awaiting_approval", "sent", "declined", "failed", "cancelled"] as const;
+const STORED = [
+  "queued",
+  "waiting",
+  "pending",
+  "awaiting_approval",
+  "sent",
+  "declined",
+  "failed",
+  "cancelled",
+] as const;
 const POSTED = ["awaiting_approval", "sent", "declined", "failed", "queued"] as const;
 
 const sqlFiles = [
@@ -91,7 +114,11 @@ function call(
   body: unknown,
   token: string | null,
   sql: Sql,
-  extra: { cookie?: string; session?: OutboxApiDeps["session"]; env?: { INGEST_TOKEN?: string } } = {},
+  extra: {
+    cookie?: string;
+    session?: OutboxApiDeps["session"];
+    env?: { INGEST_TOKEN?: string };
+  } = {},
 ): Promise<Response> {
   const headers = new Headers();
   if (body !== undefined) headers.set("content-type", "application/json");
@@ -114,7 +141,11 @@ function call(
 function allowedMove(from: string, to: string): boolean {
   const queued = from === "queued" || from === "waiting" || from === "pending";
   if (queued && to === "awaiting_approval") return true;
-  if (from === "awaiting_approval" && (to === "sent" || to === "declined" || to === "failed" || to === "queued")) return true;
+  if (
+    from === "awaiting_approval" &&
+    (to === "sent" || to === "declined" || to === "failed" || to === "queued")
+  )
+    return true;
   return false;
 }
 
@@ -145,12 +176,24 @@ async function seed(
     `insert into mail_outbound (
        client_send_id, thread_id, spec, status, created_at, updated_at, reply_to_message_id, thread_key
      ) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [row.id, "thr_ui", JSON.stringify(spec), row.status, row.createdAt, row.createdAt, row.replyTo ?? null, "thr_ui"],
+    [
+      row.id,
+      "thr_ui",
+      JSON.stringify(spec),
+      row.status,
+      row.createdAt,
+      row.createdAt,
+      row.replyTo ?? null,
+      "thr_ui",
+    ],
   );
 }
 
 async function statusOf(sql: Sql, id: string): Promise<string | undefined> {
-  const rows = await sql.query<{ status: string }>(`select status from mail_outbound where client_send_id = $1`, [id]);
+  const rows = await sql.query<{ status: string }>(
+    `select status from mail_outbound where client_send_id = $1`,
+    [id],
+  );
   return rows[0]?.status;
 }
 
@@ -239,21 +282,33 @@ describe("outbox copy", () => {
       { id: "thr_wait", messages: [waiting] },
       { id: "thr_sent", messages: [sent] },
     ];
-    assert.equal(sentCopyForOutbox({ id: "send_1", status: "queued", providerMessageId: "prov-9" }, threads), null);
-    assert.deepEqual(sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: "prov-9" }, threads), {
-      threadId: "thr_sent",
-      messageId: "msg_prov-9",
-    });
+    assert.equal(
+      sentCopyForOutbox({ id: "send_1", status: "queued", providerMessageId: "prov-9" }, threads),
+      null,
+    );
+    assert.deepEqual(
+      sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: "prov-9" }, threads),
+      {
+        threadId: "thr_sent",
+        messageId: "msg_prov-9",
+      },
+    );
     assert.deepEqual(
       sentCopyForOutbox({ id: "send_2", status: "sent", providerMessageId: "prov-9" }, [
-        { id: "thr_a", messages: [{ id: "other", messageId: "prov-9", clientSendId: "send_other" }] },
+        {
+          id: "thr_a",
+          messages: [{ id: "other", messageId: "prov-9", clientSendId: "send_other" }],
+        },
       ]),
       { threadId: "thr_a", messageId: "other" },
     );
-    assert.deepEqual(sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: null }, threads), {
-      threadId: "thr_wait",
-      messageId: "msg_wait",
-    });
+    assert.deepEqual(
+      sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: null }, threads),
+      {
+        threadId: "thr_wait",
+        messageId: "msg_wait",
+      },
+    );
     assert.deepEqual(
       sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: "prov-9" }, [
         { id: "thr_wait", messages: [waiting] },
@@ -303,7 +358,9 @@ describe("outbox copy", () => {
          ('send_prov', 'thr_other', '{}', 'sent', '2026-10-01T00:00:00.000Z', 'prov-1')`,
       );
       await deleteOutboundForMailbox(db.sql, ["thr_gone"], ["prov-1"]);
-      const left = await db.sql.query<{ client_send_id: string }>(`select client_send_id from mail_outbound order by client_send_id`);
+      const left = await db.sql.query<{ client_send_id: string }>(
+        `select client_send_id from mail_outbound order by client_send_id`,
+      );
       assert.deepEqual(
         left.map((item) => item.client_send_id),
         ["send_keep"],
@@ -318,31 +375,71 @@ describe("outbox api", () => {
   it("rejects a missing token, a wrong token, a cookie, and an unset token without opening the database", async () => {
     const db = throwingSql();
     const cookie = sessionCookie();
-    const probe = new Request("https://mail.example/api/outbox?status=queued", { headers: { cookie } });
+    const probe = new Request("https://mail.example/api/outbox?status=queued", {
+      headers: { cookie },
+    });
     assert.equal(await sessionAllowed(probe, sessionDeps()), true);
     const session = (request: Request) => sessionAllowed(request, sessionDeps());
 
-    const missing = await call("GET", "/api/outbox?status=queued", undefined, null, db.sql, { cookie, session });
+    const missing = await call("GET", "/api/outbox?status=queued", undefined, null, db.sql, {
+      cookie,
+      session,
+    });
     assert.equal(missing.status, 401);
     assert.deepEqual(await missing.json(), { error: "unauthorized" });
 
-    const wrong = await call("GET", "/api/outbox?status=queued", undefined, "Bearer wrong-token", db.sql, { cookie, session });
+    const wrong = await call(
+      "GET",
+      "/api/outbox?status=queued",
+      undefined,
+      "Bearer wrong-token",
+      db.sql,
+      { cookie, session },
+    );
     assert.equal(wrong.status, 401);
 
-    const posted = await call("POST", "/api/outbox/send_1/status", { status: "awaiting_approval" }, null, db.sql, { cookie, session });
+    const posted = await call(
+      "POST",
+      "/api/outbox/send_1/status",
+      { status: "awaiting_approval" },
+      null,
+      db.sql,
+      { cookie, session },
+    );
     assert.equal(posted.status, 401);
     assert.deepEqual(await posted.json(), { error: "unauthorized" });
 
-    const unset = await call("GET", "/api/outbox?status=queued", undefined, `Bearer ${TOKEN}`, db.sql, { env: {} });
+    const unset = await call(
+      "GET",
+      "/api/outbox?status=queued",
+      undefined,
+      `Bearer ${TOKEN}`,
+      db.sql,
+      { env: {} },
+    );
     assert.equal(unset.status, 503);
     assert.deepEqual(await unset.json(), { error: "unavailable" });
 
-    const blank = await call("POST", "/api/outbox/send_1/status", { status: "sent" }, `Bearer ${TOKEN}`, db.sql, {
-      env: { INGEST_TOKEN: "  " },
-    });
+    const blank = await call(
+      "POST",
+      "/api/outbox/send_1/status",
+      { status: "sent" },
+      `Bearer ${TOKEN}`,
+      db.sql,
+      {
+        env: { INGEST_TOKEN: "  " },
+      },
+    );
     assert.equal(blank.status, 503);
 
-    const cancel = await call("DELETE", "/api/outbox/send_1", undefined, `Bearer ${TOKEN}`, db.sql, { session });
+    const cancel = await call(
+      "DELETE",
+      "/api/outbox/send_1",
+      undefined,
+      `Bearer ${TOKEN}`,
+      db.sql,
+      { session },
+    );
     assert.equal(cancel.status, 401);
     assert.deepEqual(await cancel.json(), { error: "unauthorized" });
     assert.equal(db.opened(), false);
@@ -378,11 +475,22 @@ describe("outbox api", () => {
         subject: "Missing parent",
         text: "Still queued",
       });
-      await seed(db.sql, { id: "send_sent", status: "sent", createdAt: "2026-09-01T00:00:00.000Z" });
-
-      const response = await call("GET", "/api/outbox?status=queued", undefined, `Bearer ${TOKEN}`, db.sql, {
-        cookie: "gb_session=not-a-session",
+      await seed(db.sql, {
+        id: "send_sent",
+        status: "sent",
+        createdAt: "2026-09-01T00:00:00.000Z",
       });
+
+      const response = await call(
+        "GET",
+        "/api/outbox?status=queued",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        {
+          cookie: "gb_session=not-a-session",
+        },
+      );
       assert.equal(response.status, 200);
       const body: unknown = await response.json();
       assert.deepEqual(body, [
@@ -421,7 +529,13 @@ describe("outbox api", () => {
       assert.equal(serialized.includes("hidden-bcc@example.com"), false);
       assert.equal(serialized.includes('"bcc"'), false);
 
-      const other = await call("GET", "/api/outbox?status=sent", undefined, `Bearer ${TOKEN}`, db.sql);
+      const other = await call(
+        "GET",
+        "/api/outbox?status=sent",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
       assert.equal(other.status, 400);
       const omitted = await call("GET", "/api/outbox", undefined, `Bearer ${TOKEN}`, db.sql);
       assert.equal(omitted.status, 400);
@@ -441,10 +555,18 @@ describe("outbox api", () => {
         for (const to of POSTED) {
           const id = `send_${from}_${to}`;
           await seed(db.sql, { id, status: from, createdAt: "2026-10-01T00:00:00.000Z" });
-          const payload: { status: string; providerMessageId?: string; error?: string } = { status: to };
+          const payload: { status: string; providerMessageId?: string; error?: string } = {
+            status: to,
+          };
           if (to === "sent") payload.providerMessageId = `p-${from}-${to}`;
           if (to === "failed") payload.error = "nope";
-          const response = await call("POST", `/api/outbox/${id}/status`, payload, `Bearer ${TOKEN}`, db.sql);
+          const response = await call(
+            "POST",
+            `/api/outbox/${id}/status`,
+            payload,
+            `Bearer ${TOKEN}`,
+            db.sql,
+          );
           const after = await statusOf(db.sql, id);
           if (allowedMove(from, to)) {
             ok += 1;
@@ -474,21 +596,49 @@ describe("outbox api", () => {
       );
       assert.equal(declined[0]?.error, null);
 
-      await seed(db.sql, { id: "send_hold", status: "awaiting_approval", createdAt: "2026-10-04T00:00:00.000Z" });
-      const needsId = await call("POST", "/api/outbox/send_hold/status", { status: "sent" }, `Bearer ${TOKEN}`, db.sql);
+      await seed(db.sql, {
+        id: "send_hold",
+        status: "awaiting_approval",
+        createdAt: "2026-10-04T00:00:00.000Z",
+      });
+      const needsId = await call(
+        "POST",
+        "/api/outbox/send_hold/status",
+        { status: "sent" },
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
       assert.equal(needsId.status, 400);
       assert.equal(await statusOf(db.sql, "send_hold"), "awaiting_approval");
 
-      const missing = await call("POST", "/api/outbox/send_missing/status", { status: "awaiting_approval" }, `Bearer ${TOKEN}`, db.sql);
+      const missing = await call(
+        "POST",
+        "/api/outbox/send_missing/status",
+        { status: "awaiting_approval" },
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
       assert.equal(missing.status, 404);
       assert.deepEqual(await missing.json(), { error: "not found" });
 
       for (const status of ["cancelled", "approved", "waiting", "pending", ""]) {
-        const response = await call("POST", "/api/outbox/send_hold/status", { status }, `Bearer ${TOKEN}`, db.sql);
+        const response = await call(
+          "POST",
+          "/api/outbox/send_hold/status",
+          { status },
+          `Bearer ${TOKEN}`,
+          db.sql,
+        );
         assert.equal(response.status, 400, status);
         assert.equal(await statusOf(db.sql, "send_hold"), "awaiting_approval");
       }
-      const bad = await call("POST", "/api/outbox/send_hold/status", "{", `Bearer ${TOKEN}`, db.sql);
+      const bad = await call(
+        "POST",
+        "/api/outbox/send_hold/status",
+        "{",
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
       assert.equal(bad.status, 400);
       assert.deepEqual(await messageIds(db.sql), ["msg_p-awaiting_approval-sent"]);
     } finally {
@@ -504,140 +654,180 @@ describe("outbox api", () => {
       for (const status of STORED) {
         const id = `cancel_${status}`;
         await seed(db.sql, { id, status, createdAt: "2026-10-01T00:00:00.000Z" });
-        const response = await call("DELETE", `/api/outbox/${id}`, undefined, null, db.sql, { session });
+        const response = await call("DELETE", `/api/outbox/${id}`, undefined, null, db.sql, {
+          session,
+        });
         const queued = status === "queued" || status === "waiting" || status === "pending";
         assert.equal(response.status, queued ? 200 : 409, status);
         assert.equal(await statusOf(db.sql, id), queued ? "cancelled" : status, status);
       }
 
-      const noSession = await call("DELETE", "/api/outbox/cancel_sent", undefined, `Bearer ${TOKEN}`, db.sql, { session: refused });
+      const noSession = await call(
+        "DELETE",
+        "/api/outbox/cancel_sent",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        { session: refused },
+      );
       assert.equal(noSession.status, 401);
       assert.equal(await statusOf(db.sql, "cancel_sent"), "sent");
 
-      const unknown = await call("DELETE", "/api/outbox/cancel_missing", undefined, null, db.sql, { session });
+      const unknown = await call("DELETE", "/api/outbox/cancel_missing", undefined, null, db.sql, {
+        session,
+      });
       assert.equal(unknown.status, 404);
-      const hidden = await call("DELETE", "/api/outbox/cancel_missing", undefined, `Bearer ${TOKEN}`, db.sql, { session: refused });
+      const hidden = await call(
+        "DELETE",
+        "/api/outbox/cancel_missing",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+        { session: refused },
+      );
       assert.equal(hidden.status, 401);
 
-      const listed = await call("GET", "/api/outbox?status=queued", undefined, `Bearer ${TOKEN}`, db.sql);
+      const listed = await call(
+        "GET",
+        "/api/outbox?status=queued",
+        undefined,
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
       assert.deepEqual(await listed.json(), []);
     } finally {
       await db.close();
     }
   });
 
-  it("inserts one outbound message and a later ingest updates it", { timeout: 120_000 }, async () => {
-    const db = await database();
-    try {
-      await parentMessage(db.sql);
-      await seed(db.sql, {
-        id: "send_reply",
-        status: "awaiting_approval",
-        createdAt: "2026-10-02T00:00:00.000Z",
-        replyTo: "msg_parent",
-        subject: "Hello",
-        text: "Body text",
-      });
-      const first = await call(
-        "POST",
-        "/api/outbox/send_reply/status",
-        { status: "sent", providerMessageId: "prov-1" },
-        `Bearer ${TOKEN}`,
-        db.sql,
-      );
-      assert.equal(first.status, 200);
-      assert.deepEqual(await first.json(), { id: "send_reply", status: "sent" });
-      const inserted = await loadMessages(db.sql);
-      const created = inserted.find((row) => row.id === "msg_prov-1");
-      assert.ok(created);
-      assert.equal(created.direction, "outbound");
-      assert.equal(created.thread_hint, "hint-parent");
-      assert.equal(created.in_reply_to, "<parent@example.com>");
-      assert.equal(created.body, "Body text");
-      assert.equal(created.client_send_id, "send_reply");
-      assert.equal(created.unread, false);
-      assert.deepEqual(JSON.parse(created.bcc_json), []);
-      assert.equal(JSON.parse(created.from_json).email, "you@example.com");
-      const createdAt = created.date instanceof Date ? created.date.toISOString() : String(created.date);
-      const age = Date.now() - Date.parse(createdAt);
-      assert.ok(age >= -5_000 && age < 120_000, createdAt);
+  it(
+    "inserts one outbound message and a later ingest updates it",
+    { timeout: 120_000 },
+    async () => {
+      const db = await database();
+      try {
+        await parentMessage(db.sql);
+        await seed(db.sql, {
+          id: "send_reply",
+          status: "awaiting_approval",
+          createdAt: "2026-10-02T00:00:00.000Z",
+          replyTo: "msg_parent",
+          subject: "Hello",
+          text: "Body text",
+        });
+        const first = await call(
+          "POST",
+          "/api/outbox/send_reply/status",
+          { status: "sent", providerMessageId: "prov-1" },
+          `Bearer ${TOKEN}`,
+          db.sql,
+        );
+        assert.equal(first.status, 200);
+        assert.deepEqual(await first.json(), { id: "send_reply", status: "sent" });
+        const inserted = await loadMessages(db.sql);
+        const created = inserted.find((row) => row.id === "msg_prov-1");
+        assert.ok(created);
+        assert.equal(created.direction, "outbound");
+        assert.equal(created.thread_hint, "hint-parent");
+        assert.equal(created.in_reply_to, "<parent@example.com>");
+        assert.equal(created.body, "Body text");
+        assert.equal(created.client_send_id, "send_reply");
+        assert.equal(created.unread, false);
+        assert.deepEqual(JSON.parse(created.bcc_json), []);
+        assert.equal(JSON.parse(created.from_json).email, "you@example.com");
+        const createdAt =
+          created.date instanceof Date ? created.date.toISOString() : String(created.date);
+        const age = Date.now() - Date.parse(createdAt);
+        assert.ok(age >= -5_000 && age < 120_000, createdAt);
 
-      const again = await call(
-        "POST",
-        "/api/outbox/send_reply/status",
-        { status: "sent", providerMessageId: "prov-1" },
-        `Bearer ${TOKEN}`,
-        db.sql,
-      );
-      assert.equal(again.status, 409);
-      assert.deepEqual((await messageIds(db.sql)).sort(), ["msg_parent", "msg_prov-1"].sort());
+        const again = await call(
+          "POST",
+          "/api/outbox/send_reply/status",
+          { status: "sent", providerMessageId: "prov-1" },
+          `Bearer ${TOKEN}`,
+          db.sql,
+        );
+        assert.equal(again.status, 409);
+        assert.deepEqual((await messageIds(db.sql)).sort(), ["msg_parent", "msg_prov-1"].sort());
 
-      const ingested = await handleIngestApi(
-        new Request("https://mail.example/api/ingest", {
-          method: "POST",
-          headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
-          body: JSON.stringify({
-            items: [
-              {
-                kind: "message",
-                id: "msg_prov-1",
-                messageId: "<prov-1@example.com>",
-                from: { name: "You", email: "you@example.com" },
-                to: [{ name: "Ada", email: "ada@example.com" }],
-                subject: "Hello",
-                body: "Updated body",
-                date: "2026-10-18T12:00:00.000Z",
-              },
-            ],
+        const ingested = await handleIngestApi(
+          new Request("https://mail.example/api/ingest", {
+            method: "POST",
+            headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+            body: JSON.stringify({
+              items: [
+                {
+                  kind: "message",
+                  id: "msg_prov-1",
+                  messageId: "<prov-1@example.com>",
+                  from: { name: "You", email: "you@example.com" },
+                  to: [{ name: "Ada", email: "ada@example.com" }],
+                  subject: "Hello",
+                  body: "Updated body",
+                  date: "2026-10-18T12:00:00.000Z",
+                },
+              ],
+            }),
           }),
-        }),
-        { env: { INGEST_TOKEN: TOKEN }, sql: db.sql },
-      );
-      assert.equal(ingested.status, 200);
-      assert.deepEqual((await messageIds(db.sql)).sort(), ["msg_parent", "msg_prov-1"].sort());
+          { env: { INGEST_TOKEN: TOKEN }, sql: db.sql },
+        );
+        assert.equal(ingested.status, 200);
+        assert.deepEqual((await messageIds(db.sql)).sort(), ["msg_parent", "msg_prov-1"].sort());
 
-      const rows = await loadMessages(db.sql);
-      const sent = rows.find((row) => row.id === "msg_prov-1");
-      assert.ok(sent);
-      assert.equal(sent.direction, "outbound");
-      assert.equal(sent.thread_hint, "hint-parent");
-      assert.equal(sent.body, "Updated body");
-      assert.equal(sent.unread, false);
+        const rows = await loadMessages(db.sql);
+        const sent = rows.find((row) => row.id === "msg_prov-1");
+        assert.ok(sent);
+        assert.equal(sent.direction, "outbound");
+        assert.equal(sent.thread_hint, "hint-parent");
+        assert.equal(sent.body, "Updated body");
+        assert.equal(sent.unread, false);
 
-      const messages: Message[] = rows.map((row) => ({
-        id: row.id,
-        messageId: row.message_id,
-        inReplyTo: row.in_reply_to,
-        references: JSON.parse(row.references_json) as string[],
-        deliveredTo: null,
-        account: "primary",
-        from: JSON.parse(row.from_json) as Message["from"],
-        to: JSON.parse(row.to_json) as Message["to"],
-        cc: JSON.parse(row.cc_json) as Message["cc"],
-        bcc: JSON.parse(row.bcc_json) as Message["bcc"],
-        subject: row.subject,
-        body: row.body,
-        date: row.date instanceof Date ? row.date.toISOString() : String(row.date),
-        attachments: [],
-        threadHint: row.thread_hint,
-        direction: row.direction === "outbound" || row.direction === "inbound" ? row.direction : null,
-      }));
-      const threads = threadsFromMessages(messages, new Map(messages.map((message) => [message.id, false])));
-      assert.equal(threads.length, 1);
-      assert.deepEqual(
-        threads[0]?.messages.map((message) => message.id).sort(),
-        ["msg_parent", "msg_prov-1"],
-      );
-      assert.equal(inFolder(threads[0]!, "sent", Date.parse("2026-10-18T12:00:00.000Z"), new Set()), true);
-    } finally {
-      await db.close();
-    }
-  });
+        const messages: Message[] = rows.map((row) => ({
+          id: row.id,
+          messageId: row.message_id,
+          inReplyTo: row.in_reply_to,
+          references: JSON.parse(row.references_json) as string[],
+          deliveredTo: null,
+          account: "primary",
+          from: JSON.parse(row.from_json) as Message["from"],
+          to: JSON.parse(row.to_json) as Message["to"],
+          cc: JSON.parse(row.cc_json) as Message["cc"],
+          bcc: JSON.parse(row.bcc_json) as Message["bcc"],
+          subject: row.subject,
+          body: row.body,
+          date: row.date instanceof Date ? row.date.toISOString() : String(row.date),
+          attachments: [],
+          threadHint: row.thread_hint,
+          direction:
+            row.direction === "outbound" || row.direction === "inbound" ? row.direction : null,
+        }));
+        const threads = threadsFromMessages(
+          messages,
+          new Map(messages.map((message) => [message.id, false])),
+        );
+        assert.equal(threads.length, 1);
+        assert.deepEqual(threads[0]?.messages.map((message) => message.id).sort(), [
+          "msg_parent",
+          "msg_prov-1",
+        ]);
+        assert.equal(
+          inFolder(threads[0]!, "sent", Date.parse("2026-10-18T12:00:00.000Z"), new Set()),
+          true,
+        );
+      } finally {
+        await db.close();
+      }
+    },
+  );
 
   it("starts a new thread when the send is not a reply", async () => {
     const db = await database();
     try {
-      await seed(db.sql, { id: "send_fresh", status: "awaiting_approval", createdAt: "2026-10-02T00:00:00.000Z" });
+      await seed(db.sql, {
+        id: "send_fresh",
+        status: "awaiting_approval",
+        createdAt: "2026-10-02T00:00:00.000Z",
+      });
       const response = await call(
         "POST",
         "/api/outbox/send_fresh/status",
@@ -646,9 +836,11 @@ describe("outbox api", () => {
         db.sql,
       );
       assert.equal(response.status, 200);
-      const rows = await db.sql.query<{ id: string; thread_hint: string | null; direction: string | null }>(
-        `select id, thread_hint, direction from mail_message`,
-      );
+      const rows = await db.sql.query<{
+        id: string;
+        thread_hint: string | null;
+        direction: string | null;
+      }>(`select id, thread_hint, direction from mail_message`);
       assert.equal(rows.length, 1);
       assert.equal(rows[0]?.id, "msg_fresh-1");
       assert.equal(rows[0]?.thread_hint, "outbox:send_fresh");
@@ -675,7 +867,10 @@ describe("outbox api", () => {
         db.sql,
       );
       assert.equal(response.status, 200);
-      const rows = await db.sql.query<{ html_body: string | null }>(`select html_body from mail_message where id = $1`, ["msg_html-1"]);
+      const rows = await db.sql.query<{ html_body: string | null }>(
+        `select html_body from mail_message where id = $1`,
+        ["msg_html-1"],
+      );
       assert.equal(rows[0]?.html_body, "<p>Sent <b>note</b></p>");
     } finally {
       await db.close();
@@ -685,11 +880,31 @@ describe("outbox api", () => {
   it("updates mail_outbound from an ingest send-result using the same rules", async () => {
     const db = await database();
     try {
-      await seed(db.sql, { id: "send_ok", status: "awaiting_approval", createdAt: "2026-10-01T00:00:00.000Z" });
-      await seed(db.sql, { id: "send_early", status: "queued", createdAt: "2026-10-01T00:00:01.000Z" });
-      await seed(db.sql, { id: "send_bad", status: "awaiting_approval", createdAt: "2026-10-01T00:00:02.000Z" });
-      await seed(db.sql, { id: "send_back", status: "awaiting_approval", createdAt: "2026-10-01T00:00:03.000Z" });
-      await seed(db.sql, { id: "send_no_id", status: "awaiting_approval", createdAt: "2026-10-01T00:00:04.000Z" });
+      await seed(db.sql, {
+        id: "send_ok",
+        status: "awaiting_approval",
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+      await seed(db.sql, {
+        id: "send_early",
+        status: "queued",
+        createdAt: "2026-10-01T00:00:01.000Z",
+      });
+      await seed(db.sql, {
+        id: "send_bad",
+        status: "awaiting_approval",
+        createdAt: "2026-10-01T00:00:02.000Z",
+      });
+      await seed(db.sql, {
+        id: "send_back",
+        status: "awaiting_approval",
+        createdAt: "2026-10-01T00:00:03.000Z",
+      });
+      await seed(db.sql, {
+        id: "send_no_id",
+        status: "awaiting_approval",
+        createdAt: "2026-10-01T00:00:04.000Z",
+      });
 
       async function ingest(items: unknown[]): Promise<Response> {
         return handleIngestApi(
@@ -703,13 +918,25 @@ describe("outbox api", () => {
       }
 
       const sent = await ingest([
-        { kind: "send-result", clientSendId: "send_ok", status: "sent", sentMessageId: "prov-sr", error: null },
+        {
+          kind: "send-result",
+          clientSendId: "send_ok",
+          status: "sent",
+          sentMessageId: "prov-sr",
+          error: null,
+        },
       ]);
       assert.equal(sent.status, 200);
       assert.equal(await statusOf(db.sql, "send_ok"), "sent");
 
       const early = await ingest([
-        { kind: "send-result", clientSendId: "send_early", status: "approved", sentMessageId: "prov-early", error: null },
+        {
+          kind: "send-result",
+          clientSendId: "send_early",
+          status: "approved",
+          sentMessageId: "prov-early",
+          error: null,
+        },
       ]);
       assert.equal(early.status, 200);
       assert.equal(await statusOf(db.sql, "send_early"), "queued");
@@ -719,23 +946,29 @@ describe("outbox api", () => {
       ]);
       assert.equal(failed.status, 200);
       assert.equal(await statusOf(db.sql, "send_bad"), "failed");
-      const error = await db.sql.query<{ error: string | null }>(`select error from mail_outbound where client_send_id = $1`, [
-        "send_bad",
-      ]);
+      const error = await db.sql.query<{ error: string | null }>(
+        `select error from mail_outbound where client_send_id = $1`,
+        ["send_bad"],
+      );
       assert.equal(error[0]?.error, "nope");
 
-      const back = await ingest([{ kind: "send-result", clientSendId: "send_back", status: "waiting" }]);
+      const back = await ingest([
+        { kind: "send-result", clientSendId: "send_back", status: "waiting" },
+      ]);
       assert.equal(back.status, 200);
       assert.equal(await statusOf(db.sql, "send_back"), "queued");
 
-      const noId = await ingest([{ kind: "send-result", clientSendId: "send_no_id", status: "sent", sentMessageId: null }]);
+      const noId = await ingest([
+        { kind: "send-result", clientSendId: "send_no_id", status: "sent", sentMessageId: null },
+      ]);
       assert.equal(noId.status, 200);
       assert.equal(await statusOf(db.sql, "send_no_id"), "awaiting_approval");
 
       assert.deepEqual(await messageIds(db.sql), ["msg_prov-sr"]);
-      const direction = await db.sql.query<{ direction: string | null }>(`select direction from mail_message where id = $1`, [
-        "msg_prov-sr",
-      ]);
+      const direction = await db.sql.query<{ direction: string | null }>(
+        `select direction from mail_message where id = $1`,
+        ["msg_prov-sr"],
+      );
       assert.equal(direction[0]?.direction, "outbound");
     } finally {
       await db.close();
@@ -746,9 +979,11 @@ describe("outbox api", () => {
     const previousDatabase = process.env.DATABASE_URL;
     const previousUnpooled = process.env.DATABASE_URL_UNPOOLED;
     const previousStub = process.env.OUTBOX_STUB_DB;
+    const previousDemo = process.env.GBM_DEMO;
     delete process.env.DATABASE_URL;
     delete process.env.DATABASE_URL_UNPOOLED;
     process.env.OUTBOX_STUB_DB = "1";
+    process.env.GBM_DEMO = "0";
     try {
       enableAlias();
       const root = await mkdtemp(join(tmpdir(), "mail-unconfigured-"));
@@ -778,10 +1013,9 @@ describe("outbox api", () => {
       assert.equal(result.notice.toLowerCase().includes("reply"), false);
       assert.notEqual(result.notice, WAKE_FAILURE);
       assert.equal(result.delivery, "waiting");
-      const signed = "Typed body\n\n--\nYou\nyou@example.test";
-      assert.equal(result.data.outbox?.[0]?.text, signed);
+      assert.equal(result.data.outbox?.[0]?.text, "Typed body");
       assert.equal(result.data.outbox?.[0]?.status, "queued");
-      assert.equal(result.data.threads[0]?.messages[0]?.body, signed);
+      assert.equal(result.data.threads[0]?.messages[0]?.body, "Typed body");
     } finally {
       if (previousDatabase === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previousDatabase;
@@ -789,6 +1023,8 @@ describe("outbox api", () => {
       else process.env.DATABASE_URL_UNPOOLED = previousUnpooled;
       if (previousStub === undefined) delete process.env.OUTBOX_STUB_DB;
       else process.env.OUTBOX_STUB_DB = previousStub;
+      if (previousDemo === undefined) delete process.env.GBM_DEMO;
+      else process.env.GBM_DEMO = previousDemo;
     }
   });
 });
@@ -817,7 +1053,11 @@ describe("wake retries", () => {
   it("exhausts five failures into Failed and Retry re-queues", async () => {
     const db = await database();
     try {
-      await seed(db.sql, { id: "send_wake", status: "queued", createdAt: "2026-10-19T12:00:00.000Z" });
+      await seed(db.sql, {
+        id: "send_wake",
+        status: "queued",
+        createdAt: "2026-10-19T12:00:00.000Z",
+      });
       const now = Date.parse("2026-10-19T12:00:00.000Z");
       const delays = [30_000, 120_000, 600_000, 3_600_000];
       for (let attempt = 1; attempt <= 4; attempt += 1) {
@@ -904,7 +1144,11 @@ describe("wake retries", () => {
     if (!address || typeof address === "string") throw new Error("no port");
     const url = `http://127.0.0.1:${address.port}/hook`;
     try {
-      const saved = await saveMailboxConnection(db.sql, { webhookUrl: url, webhookKey: SENDER_KEY, headerMode: "bearer" }, root);
+      const saved = await saveMailboxConnection(
+        db.sql,
+        { webhookUrl: url, webhookKey: SENDER_KEY, headerMode: "bearer" },
+        root,
+      );
       assert.equal(JSON.stringify(saved).includes(SENDER_KEY), false);
       assert.equal(saved.keySet, true);
       assert.deepEqual(Object.keys(saved).sort(), ["headerMode", "keySet", "webhookUrl"]);
@@ -923,20 +1167,33 @@ describe("wake retries", () => {
         () =>
           saveMailboxConnection(
             db.sql,
-            { webhookUrl: "https://user:secret@example.com/hook", webhookKey: "next-key", headerMode: "bearer" },
+            {
+              webhookUrl: "https://user:secret@example.com/hook",
+              webhookKey: "next-key",
+              headerMode: "bearer",
+            },
             root,
           ),
         /invalid/,
       );
       await assert.rejects(
-        () => saveMailboxConnection(db.sql, { webhookUrl: "ftp://example.com/hook", webhookKey: "next-key", headerMode: "bearer" }, root),
+        () =>
+          saveMailboxConnection(
+            db.sql,
+            { webhookUrl: "ftp://example.com/hook", webhookKey: "next-key", headerMode: "bearer" },
+            root,
+          ),
         /invalid/,
       );
 
       await mkdir(join(root, "data"));
       await writeFile(
         join(root, "data", "config.json"),
-        JSON.stringify({ webhookUrl: "https://file.example.com/hook", webhookKey: "file-key", headerMode: "bearer" }),
+        JSON.stringify({
+          webhookUrl: "https://file.example.com/hook",
+          webhookKey: "file-key",
+          headerMode: "bearer",
+        }),
       );
       const fromRow = await loadMailConfig(root, db.sql);
       assert.equal(fromRow.secrets?.webhookUrl, "https://example.com/hook");
@@ -946,17 +1203,29 @@ describe("wake retries", () => {
       assert.equal(JSON.stringify(toPublicConfig(fromRow)).includes(SENDER_KEY), false);
       assert.equal(JSON.stringify(toPublicConfig(fromRow)).includes("webhookUrl"), false);
 
-      const cleared = await saveMailboxConnection(db.sql, { webhookUrl: "", webhookKey: "", headerMode: "bearer" }, root);
+      const cleared = await saveMailboxConnection(
+        db.sql,
+        { webhookUrl: "", webhookKey: "", headerMode: "bearer" },
+        root,
+      );
       assert.equal(cleared.webhookUrl, "");
       assert.equal(cleared.keySet, true);
       assert.equal((await loadMailConfig(root, db.sql)).secrets, null);
 
-      await saveMailboxConnection(db.sql, { webhookUrl: url, webhookKey: "", headerMode: "bearer" }, root);
-      await seed(db.sql, { id: "send_due", status: "queued", createdAt: "2026-10-19T12:00:00.000Z" });
-      await db.sql.query(`update mail_outbound set next_attempt_at = $2 where client_send_id = $1`, [
-        "send_due",
-        "2020-01-01T00:00:00.000Z",
-      ]);
+      await saveMailboxConnection(
+        db.sql,
+        { webhookUrl: url, webhookKey: "", headerMode: "bearer" },
+        root,
+      );
+      await seed(db.sql, {
+        id: "send_due",
+        status: "queued",
+        createdAt: "2026-10-19T12:00:00.000Z",
+      });
+      await db.sql.query(
+        `update mail_outbound set next_attempt_at = $2 where client_send_id = $1`,
+        ["send_due", "2020-01-01T00:00:00.000Z"],
+      );
       await runDueWakes(db.sql, root, Date.parse("2026-10-19T12:00:00.000Z"));
       assert.ok(seen);
       const posted = seen as { headers: IncomingMessage["headers"]; body: Record<string, unknown> };
@@ -974,12 +1243,15 @@ describe("wake retries", () => {
       assert.equal(after.next_attempt_at, null);
       assert.equal(after.last_error, null);
 
-      await seed(db.sql, { id: "send_bot", status: "awaiting_approval", createdAt: "2026-10-19T12:00:00.000Z" });
-      await db.sql.query(`update mail_outbound set next_attempt_at = $2, last_error = $3 where client_send_id = $1`, [
-        "send_bot",
-        "2020-01-01T00:00:00.000Z",
-        "old",
-      ]);
+      await seed(db.sql, {
+        id: "send_bot",
+        status: "awaiting_approval",
+        createdAt: "2026-10-19T12:00:00.000Z",
+      });
+      await db.sql.query(
+        `update mail_outbound set next_attempt_at = $2, last_error = $3 where client_send_id = $1`,
+        ["send_bot", "2020-01-01T00:00:00.000Z", "old"],
+      );
       const moved = await transitionOutbound(db.sql, "send_bot", {
         status: "failed",
         providerMessageId: null,

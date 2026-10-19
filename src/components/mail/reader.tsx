@@ -399,11 +399,14 @@ function TextBtn({
 
 function Body({ text }: { text: string }) {
   const doc = useMemo(() => parseBody(text), [text]);
+  // A cut that leaves no visible prose would look blank. Show that text instead.
+  const blocks = doc.blocks.length > 0 ? doc.blocks : (doc.hidden ?? []);
+  const hidden = doc.blocks.length > 0 ? doc.hidden : null;
   const [trimmed, setTrimmed] = useState(false);
-  const quotedLabel = quotedControlLabel(doc.hidden, trimmed);
+  const quotedLabel = quotedControlLabel(hidden, trimmed);
   return (
     <div className="mail-body min-w-0 max-w-full space-y-4 text-[17px] font-normal leading-[1.5] text-ink">
-      <BodyBlocks blocks={doc.blocks} />
+      <BodyBlocks blocks={blocks} />
       {quotedLabel ? (
         <div>
           <button
@@ -414,9 +417,9 @@ function Body({ text }: { text: string }) {
           >
             {quotedLabel}
           </button>
-          {trimmed && doc.hidden ? (
+          {trimmed && hidden ? (
             <div className="mt-3 space-y-4 text-muted">
-              <BodyBlocks blocks={doc.hidden} />
+              <BodyBlocks blocks={hidden} />
             </div>
           ) : null}
         </div>

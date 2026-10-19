@@ -88,7 +88,7 @@ describe("inbox categories", () => {
   it("keeps people in Primary and files automated, bulk, and social senders", () => {
     assert.equal(classifyMessage(message({ name: "Mina Cole", email: "mina@example.com" })), "primary");
     assert.equal(classifyMessage(message({ name: "Mina Cole", email: "mina@example.com" }, { autoSubmitted: "no" })), "primary");
-    assert.equal(classifyMessage(message({ name: "BotBagger", email: "alerts@example.com" })), "updates");
+    assert.equal(classifyMessage(message({ name: "WatchBot", email: "alerts@example.com" })), "updates");
     assert.equal(classifyMessage(message({ name: "Notes", email: "no-reply@status.example.com" })), "updates");
     assert.equal(classifyMessage(message({ name: "Notifier", email: "notifications@github.com" })), "updates");
     assert.equal(classifyMessage(message({ name: "Post", email: "mailer-daemon@example.com" })), "updates");
@@ -107,7 +107,7 @@ describe("inbox categories", () => {
     assert.equal(
       classifyMessage(
         message(
-          { name: "Printful", email: "hello@print.example" },
+          { name: "Printshop", email: "hello@print.example" },
           { subject: "This week in the shop", body: "New colors are in. Unsubscribe any time." },
         ),
       ),
@@ -116,7 +116,7 @@ describe("inbox categories", () => {
     assert.equal(
       classifyMessage(
         message(
-          { name: "Printful", email: "hello@print.example" },
+          { name: "Printshop", email: "hello@print.example" },
           {
             subject: "This week in the shop",
             body: "New colors are in. Unsubscribe any time.",
@@ -127,10 +127,10 @@ describe("inbox categories", () => {
       "promotions",
     );
     assert.equal(
-      classifyMessage(message({ name: "BotBagger", email: "watcher@example.com" }, { subject: "Alert: bagger offline" })),
+      classifyMessage(message({ name: "WatchBot", email: "watcher@example.com" }, { subject: "Alert: sensor offline" })),
       "updates",
     );
-    assert.equal(classifyMessage(message({ name: "BotBagger", email: "watcher@example.com" })), "updates");
+    assert.equal(classifyMessage(message({ name: "WatchBot", email: "watcher@example.com" })), "updates");
     assert.equal(
       classifyMessage(message({ name: "Mina Cole", email: "mina@example.com" }, { subject: "Alert: gate open" })),
       "updates",

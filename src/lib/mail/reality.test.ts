@@ -7,11 +7,17 @@ import {
   attachmentBlobParts,
   bodyBeyondSignature,
   clearDraftThread,
+  composeDocument,
+  composeShouldSave,
   emptyMailbox,
   hideThreadIds,
   hydrateDisplaySettings,
+  isDefaultSignature,
   savedDraftThreadId,
   settingsFromUnknown,
+  signatureBlockAt,
+  signatureFor,
+  signLegacyDraftBody,
   shouldPersistDraft,
   type Thread,
 } from "./model.ts";
@@ -69,6 +75,96 @@ describe("drafts that are only a signature", () => {
     assert.equal(shouldPersistDraft({ to: "ada@example.com", body: `\n\n--\n${SIGNATURE}` }, SIGNATURE), true);
     assert.equal(shouldPersistDraft({ subject: "Notes", body: "" }, SIGNATURE), true);
     assert.equal(shouldPersistDraft({ body: "", attachments: [{ id: "file" }] }, SIGNATURE), true);
+    assert.equal(bodyBeyondSignature(`Hello\n\n-- \n${SIGNATURE}`, SIGNATURE), "Hello");
+    assert.equal(bodyBeyondSignature(`\n\n-- \n${SIGNATURE}\n\nOn Mon wrote:\n> quoted`, SIGNATURE), "");
+  });
+
+  it("keeps the signature in the editor and saves only a changed compose", () => {
+    const signature = signatureFor("Sam Rivera", "sam@example.com");
+    assert.equal(signature, "--\nSam Rivera\nsam@example.com");
+    const seeded = composeDocument("", signature);
+    assert.equal(seeded, "\n\n--\nSam Rivera\nsam@example.com");
+    assert.equal(composeDocument("", "Sent from my iPhone"), "\n\nSent from my iPhone");
+    assert.equal(composeDocument("", ""), "\n\n");
+    const quote = "On Mon, Oct 5, 2026, Ada wrote:\n> older line";
+    const reply = composeDocument("", signature, quote);
+    assert.ok(reply.indexOf("Sam Rivera") < reply.indexOf("wrote:"));
+    assert.equal(reply.split("sam@example.com").length, 2);
+    const forward = composeDocument("", signature, "---------- Forwarded message ----------\nFrom: Ada");
+    assert.ok(forward.indexOf("Sam Rivera") < forward.indexOf("Forwarded message"));
+    const letter = composeDocument("Hello", signature, quote);
+    assert.equal(bodyBeyondSignature(letter, signature), "Hello");
+    assert.equal(bodyBeyondSignature(reply, signature), "");
+    const parsed = parseBody(letter);
+    const visible = parsed.blocks
+      .map((block) => (block.kind === "p" ? block.inlines.map((part) => (part.kind === "link" ? part.label : part.text)).join("") : ""))
+      .join("\n");
+    assert.match(visible, /Hello/);
+    assert.match(visible, /Sam Rivera/);
+    assert.equal(visible.includes("wrote:"), false);
+    const hiddenText = (parsed.hidden ?? [])
+      .map((block) => (block.kind === "p" ? block.inlines.map((part) => (part.kind === "text" ? part.text : "")).join("") : ""))
+      .join("\n");
+    assert.match(hiddenText, /wrote:/);
+    const only = parseBody(composeDocument("", "Pat\npat@example.test"));
+    assert.equal(only.hidden, null);
+
+    const fresh = {
+      to: "",
+      cc: "",
+      bcc: "",
+      subject: "",
+      body: seeded,
+      attachments: [] as { filename: string; bytes: number }[],
+      seedTo: "",
+      seedCc: "",
+      seedBcc: "",
+      seedSubject: "",
+      seedBody: seeded,
+      seedAttachmentKey: "",
+    };
+    assert.equal(composeShouldSave(fresh), false);
+    assert.equal(composeShouldSave({ ...fresh, body: `Hello${seeded}` }), true);
+    assert.equal(composeShouldSave({ ...fresh, to: "ada@example.test" }), true);
+    assert.equal(composeShouldSave({ ...fresh, to: "  " }), false);
+    const replyFields = {
+      ...fresh,
+      to: "Ada <ada@example.test>",
+      subject: "Re: Notes",
+      body: reply,
+      seedTo: "Ada <ada@example.test>",
+      seedSubject: "Re: Notes",
+      seedBody: reply,
+    };
+    assert.equal(composeShouldSave(replyFields), false);
+    assert.equal(composeShouldSave({ ...replyFields, body: `Hello${reply}` }), true);
+    // Editing the signature or the quote is a change the person made, so close keeps it.
+    assert.equal(composeShouldSave({ ...replyFields, body: reply.replace("sam@example.com", "sam.r@example.test") }), true);
+    assert.equal(composeShouldSave({ ...replyFields, body: `${reply}\n> my note` }), true);
+    assert.equal(composeShouldSave({ ...fresh, attachments: [{ filename: "notes.txt", bytes: 4 }] }), true);
+  });
+
+  it("adds the signature to an older draft once and never twice", () => {
+    const signature = signatureFor("Sam Rivera", "sam@example.com");
+    const quote = "On Mon, Oct 5, 2026, Ada wrote:\n> older line";
+    const legacyReply = `Thanks, see you then.\n\n${quote}`;
+    const signed = signLegacyDraftBody(legacyReply, signature);
+    assert.equal(signed, `Thanks, see you then.\n\n${signature}\n\n${quote}`);
+    assert.equal(signLegacyDraftBody(signed, signature), signed);
+    const legacyForward = "FYI\n\n---------- Forwarded message ----------\nFrom: Ada";
+    assert.ok(signLegacyDraftBody(legacyForward, signature).indexOf("Sam Rivera") < signLegacyDraftBody(legacyForward, signature).indexOf("Forwarded"));
+    assert.equal(signLegacyDraftBody("Just a note", signature), `Just a note\n\n${signature}`);
+    // A body that already carries the signature, with or without trailing spaces, is left alone.
+    const carried = "Hi\n\n--  \nSam Rivera\nsam@example.com";
+    assert.equal(signLegacyDraftBody(carried, signature), carried);
+    assert.equal(signatureBlockAt(carried, signature), 2);
+    assert.equal(signLegacyDraftBody("Hi", ""), "Hi");
+  });
+
+  it("treats the old name-and-address default as the default signature", () => {
+    assert.equal(isDefaultSignature("Sam Rivera\nsam@example.com", "Sam Rivera", "sam@example.com"), true);
+    assert.equal(isDefaultSignature("--\nSam Rivera\nsam@example.com", "Sam Rivera", "sam@example.com"), true);
+    assert.equal(isDefaultSignature("Sam\nSent from my iPhone", "Sam Rivera", "sam@example.com"), false);
   });
 
   it("reuses the saved draft thread and drops an empty one", () => {
@@ -271,10 +367,14 @@ describe("reality wiring", () => {
     assert.match(server, /mail_settings/);
     assert.match(server, /hydrateDisplaySettings/);
     assert.match(server, /settingsPresent/);
-    assert.match(server, /overlay\?\.settingsPresent \? hydrateDisplaySettings\(overlay\.settingsSpec, localSettings\) : localSettings/);
+    assert.match(
+      server,
+      /overlay\?\.settingsPresent\s*\?\s*hydrateDisplaySettings\(overlay\.settingsSpec,\s*localSettings\)\s*:\s*localSettings/,
+    );
     assert.match(server, /!overlay\.settingsPresent/);
     assert.equal(server.includes("settingsFromUnknown"), false);
-    assert.match(server, /withSignature\(request\.body/);
+    assert.equal(server.includes("withSignature"), false);
+    assert.match(server, /body: request\.body/);
     assert.match(server, /sendWake\(clientSendId\)/);
     assert.equal(server.includes("wakeMissNotice"), false);
     assert.equal(server.includes("replyWebhook"), false);
@@ -299,13 +399,16 @@ describe("reality wiring", () => {
     const gate = between("setGateMode: (mode) => {", "setGateList: (gateList) => set");
     assert.match(gate, /persistProduct\(\)/);
     const open = between("openCompose: (mode, threadId) => {", "patchCompose: (partial) => {");
+    assert.match(open, /primeIosKeyboard/);
     assert.equal(open.includes("withSignature"), false);
+    assert.match(store, /composeDocument/);
     const send = between("send: () => {", "cancelOutbox: (id) => {");
-    assert.match(send, /withSignature/);
+    assert.match(send, /body: compose\.body/);
+    assert.equal(send.includes("withSignature"), false);
     const dismiss = between("dismissCompose: () => {", "autosaveCompose: () => {");
-    assert.match(dismiss, /shouldPersistDraft/);
+    assert.match(dismiss, /composeShouldSave/);
     const autosave = between("autosaveCompose: () => {", "addFilter: (filter) => {");
-    assert.match(autosave, /shouldPersistDraft/);
+    assert.match(autosave, /composeShouldSave/);
     assert.match(autosave, /saveDraft/);
     assert.equal(autosave.includes("Draft saved"), false);
     const forever = between("destroyForever: (id) => {", "resetMailbox: () => {");

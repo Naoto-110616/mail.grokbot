@@ -65,8 +65,22 @@ export type Message = {
   autoSubmitted?: string | null;
 };
 
-export type SeedMessage = Omit<Message, "messageId" | "inReplyTo" | "references" | "deliveredTo" | "account"> &
-  Partial<Pick<Message, "messageId" | "inReplyTo" | "references" | "deliveredTo" | "account" | "delivery" | "clientSendId">>;
+export type SeedMessage = Omit<
+  Message,
+  "messageId" | "inReplyTo" | "references" | "deliveredTo" | "account"
+> &
+  Partial<
+    Pick<
+      Message,
+      | "messageId"
+      | "inReplyTo"
+      | "references"
+      | "deliveredTo"
+      | "account"
+      | "delivery"
+      | "clientSendId"
+    >
+  >;
 
 export type DraftMode = "new" | "reply" | "replyAll" | "forward";
 
@@ -81,6 +95,8 @@ export type Draft = {
   body: string;
   updatedAt: string;
   attachments: Attachment[];
+  /** Set by editors that keep the signature in the body. Older drafts get it added once on reopen. */
+  signed?: boolean;
 };
 
 export type Location = "inbox" | "archive" | "spam" | "trash" | "drafts";
@@ -180,6 +196,8 @@ export type MailData = {
   hiddenThreadIds?: string[];
   /** Sends waiting on the bot, loaded from mail_outbound. */
   outbox?: OutboxItem[];
+  /** True when this mailbox is invented sample mail. */
+  sample?: boolean;
   /**
    * Client send ids and provider ids whose outbound rows should be deleted
    * on the next save. Cleared after that save. Not a mailbox preference.
@@ -215,7 +233,11 @@ export function accountOf(t: Thread): AccountId {
 export function resolveTheme(theme: string): "light" | "dim" | "lights-out" {
   if (theme === "dim") return "dim";
   if (theme === "lights-out" || theme === "dark") return "lights-out";
-  if (theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+  if (
+    theme === "system" &&
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  ) {
     return "lights-out";
   }
   return "light";
@@ -234,17 +256,25 @@ export function addressLocal(address: string): string {
   return local.split("+")[0] || local;
 }
 
-export function aliasesFor(address: string, displayName = "You"): Alias[] {
-  const named: { tag: string; name: string }[] = [
-    { tag: "ops", name: "Ops" },
-    { tag: "github", name: "GitHub" },
-    { tag: "books", name: "Books" },
-    { tag: "x", name: "X" },
-    { tag: "billing", name: "Billing" },
-  ];
+/** Plus tags the sample mailbox shows before an account or GBM_TAGS names real ones. */
+export const DEMO_TAGS: readonly { tag: string; name: string }[] = [
+  { tag: "ops", name: "Ops" },
+  { tag: "books", name: "Books" },
+  { tag: "billing", name: "Billing" },
+];
+
+export function aliasesFor(
+  address: string,
+  displayName = "You",
+  tags: readonly { tag: string; name: string }[] = DEMO_TAGS,
+): Alias[] {
   return [
     { email: address, tag: null, name: displayName || "Primary" },
-    ...named.map((item) => ({ email: aliasAddress(item.tag, address), tag: item.tag, name: item.name })),
+    ...tags.map((item) => ({
+      email: aliasAddress(item.tag, address),
+      tag: item.tag,
+      name: item.name,
+    })),
   ];
 }
 
@@ -252,9 +282,21 @@ export function defaultAliases(): Alias[] {
   return aliasesFor(DEMO_ADDRESS, "You");
 }
 
+/** Default profile signature: a `--` line, the display name, then the address. */
 export function signatureFor(displayName: string, address: string): string {
   const name = displayName.trim() || "You";
-  return `${name}\n${address}`;
+  return `--\n${name}\n${address}`;
+}
+
+/** The default signature, or the older name-and-address default that had no `--` line. */
+export function isDefaultSignature(
+  signature: string,
+  displayName: string,
+  address: string,
+): boolean {
+  const name = displayName.trim() || "You";
+  const text = signature.replace(/\r\n?/g, "\n").trim();
+  return text === signatureFor(displayName, address) || text === `${name}\n${address}`;
 }
 
 export function defaultSettings(): Settings {
@@ -322,15 +364,24 @@ export function settingsFromUnknown(value: unknown): Settings | null {
   const row = storedDocument(value);
   if (!row) return null;
   const base = defaultSettings();
-  const density = DENSITIES.has(row.density as Settings["density"]) ? (row.density as Settings["density"]) : base.density;
+  const density = DENSITIES.has(row.density as Settings["density"])
+    ? (row.density as Settings["density"])
+    : base.density;
   let theme = THEMES.has(row.theme as ThemeName) ? (row.theme as ThemeName) : base.theme;
   if (row.theme === "dark") theme = "lights-out";
   const pane = PANES.has(row.pane as Settings["pane"]) ? (row.pane as Settings["pane"]) : base.pane;
   const glass =
-    typeof row.glass === "number" && Number.isFinite(row.glass) ? Math.min(100, Math.max(0, Math.round(row.glass))) : base.glass;
+    typeof row.glass === "number" && Number.isFinite(row.glass)
+      ? Math.min(100, Math.max(0, Math.round(row.glass)))
+      : base.glass;
   const undoSeconds =
-    typeof row.undoSeconds === "number" && Number.isFinite(row.undoSeconds) ? row.undoSeconds : base.undoSeconds;
-  const swipe = row.swipePrefs && typeof row.swipePrefs === "object" ? (row.swipePrefs as Partial<SwipePrefs>) : null;
+    typeof row.undoSeconds === "number" && Number.isFinite(row.undoSeconds)
+      ? row.undoSeconds
+      : base.undoSeconds;
+  const swipe =
+    row.swipePrefs && typeof row.swipePrefs === "object"
+      ? (row.swipePrefs as Partial<SwipePrefs>)
+      : null;
   return {
     displayName: typeof row.displayName === "string" ? row.displayName : base.displayName,
     signature: typeof row.signature === "string" ? row.signature : base.signature,
@@ -339,7 +390,10 @@ export function settingsFromUnknown(value: unknown): Settings | null {
     glass,
     undoSeconds,
     pane,
-    defaultFrom: typeof row.defaultFrom === "string" && row.defaultFrom.includes("@") ? row.defaultFrom : base.defaultFrom,
+    defaultFrom:
+      typeof row.defaultFrom === "string" && row.defaultFrom.includes("@")
+        ? row.defaultFrom
+        : base.defaultFrom,
     vacationOn: row.vacationOn === true,
     vacationText: typeof row.vacationText === "string" ? row.vacationText : base.vacationText,
     swipePrefs: swipePrefsOf(swipe),
@@ -360,7 +414,8 @@ export function hydrateDisplaySettings(stored: unknown, local: Settings): Settin
   if (!row) return local;
   const parsed = settingsFromUnknown(row);
   if (!parsed) return local;
-  const themePresent = "theme" in row && (row.theme === "dark" || THEMES.has(row.theme as ThemeName));
+  const themePresent =
+    "theme" in row && (row.theme === "dark" || THEMES.has(row.theme as ThemeName));
   return {
     ...parsed,
     displayName: typeof row.displayName === "string" ? parsed.displayName : local.displayName,
@@ -368,12 +423,21 @@ export function hydrateDisplaySettings(stored: unknown, local: Settings): Settin
     density: DENSITIES.has(row.density as Settings["density"]) ? parsed.density : local.density,
     theme: themePresent ? parsed.theme : local.theme,
     glass: typeof row.glass === "number" && Number.isFinite(row.glass) ? parsed.glass : local.glass,
-    undoSeconds: typeof row.undoSeconds === "number" && Number.isFinite(row.undoSeconds) ? parsed.undoSeconds : local.undoSeconds,
+    undoSeconds:
+      typeof row.undoSeconds === "number" && Number.isFinite(row.undoSeconds)
+        ? parsed.undoSeconds
+        : local.undoSeconds,
     pane: PANES.has(row.pane as Settings["pane"]) ? parsed.pane : local.pane,
-    defaultFrom: typeof row.defaultFrom === "string" && row.defaultFrom.includes("@") ? parsed.defaultFrom : local.defaultFrom,
+    defaultFrom:
+      typeof row.defaultFrom === "string" && row.defaultFrom.includes("@")
+        ? parsed.defaultFrom
+        : local.defaultFrom,
     vacationOn: typeof row.vacationOn === "boolean" ? parsed.vacationOn : local.vacationOn,
     vacationText: typeof row.vacationText === "string" ? parsed.vacationText : local.vacationText,
-    swipePrefs: row.swipePrefs && typeof row.swipePrefs === "object" ? parsed.swipePrefs : (local.swipePrefs ?? parsed.swipePrefs),
+    swipePrefs:
+      row.swipePrefs && typeof row.swipePrefs === "object"
+        ? parsed.swipePrefs
+        : (local.swipePrefs ?? parsed.swipePrefs),
     senderRules: "senderRules" in row ? parsed.senderRules : local.senderRules,
     gate: "gate" in row ? parsed.gate : local.gate,
     quickReplies: "quickReplies" in row ? parsed.quickReplies : local.quickReplies,
@@ -514,7 +578,9 @@ export function inFolder(t: Thread, folder: FolderId, now: number, mine: Set<str
   if (folder === "starred") return t.starred;
   if (folder === "important") return t.important;
   if (folder === "sent") {
-    return t.messages.some((m) => m.direction === "outbound" || mine.has(m.from.email.toLowerCase()));
+    return t.messages.some(
+      (m) => m.direction === "outbound" || mine.has(m.from.email.toLowerCase()),
+    );
   }
   if (folder === "done") return isDone(t);
   if (folder.startsWith("label:")) return t.labels.includes(folder.slice(6));
@@ -574,7 +640,17 @@ function takeList(target: string[], value: string, index: number, tokens: QueryT
 }
 
 export function parseQuery(raw: string): ParsedQuery {
-  const q: ParsedQuery = { text: [], from: [], to: [], subject: [], is: [], has: [], phrases: [], after: [], before: [] };
+  const q: ParsedQuery = {
+    text: [],
+    from: [],
+    to: [],
+    subject: [],
+    is: [],
+    has: [],
+    phrases: [],
+    after: [],
+    before: [],
+  };
   const tokens: QueryToken[] = [];
   const re = /"([^"]+)"|(\S+)/g;
   let match: RegExpExecArray | null;
@@ -627,9 +703,7 @@ export function parseQuery(raw: string): ParsedQuery {
 }
 
 function haystack(t: Thread, labels: Label[]): string {
-  const labelNames = t.labels
-    .map((id) => labels.find((l) => l.id === id)?.name ?? "")
-    .join(" ");
+  const labelNames = t.labels.map((id) => labels.find((l) => l.id === id)?.name ?? "").join(" ");
   const parts = [t.subject, t.plusTag ?? "", labelNames];
   for (const m of t.messages) {
     parts.push(m.from.name, m.from.email, m.subject, m.body);
@@ -656,7 +730,9 @@ function toHit(thread: Thread, term: string): boolean {
     const needle = `+${tag}@`;
     return thread.messages.some((message) => {
       if ((message.deliveredTo ?? "").toLowerCase().includes(needle)) return true;
-      return [...message.to, ...message.cc, ...message.bcc].some((address) => address.email.toLowerCase().includes(needle));
+      return [...message.to, ...message.cc, ...message.bcc].some((address) =>
+        address.email.toLowerCase().includes(needle),
+      );
     });
   }
   return thread.messages.some((message) =>
@@ -665,9 +741,11 @@ function toHit(thread: Thread, term: string): boolean {
 }
 
 export function matchesQuery(t: Thread, q: ParsedQuery, labels: Label[], now: number): boolean {
-  if (q.from.length && !q.from.some((term) => t.messages.some((message) => fromHit(message, term)))) return false;
+  if (q.from.length && !q.from.some((term) => t.messages.some((message) => fromHit(message, term))))
+    return false;
   if (q.to.length && !q.to.some((term) => toHit(t, term))) return false;
-  if (q.subject.length && q.subject.some((part) => !t.subject.toLowerCase().includes(part))) return false;
+  if (q.subject.length && q.subject.some((part) => !t.subject.toLowerCase().includes(part)))
+    return false;
   if (q.plus && (t.plusTag ?? "") !== q.plus) return false;
   if (q.label) {
     const hit = t.labels.some((id) => {
@@ -677,10 +755,13 @@ export function matchesQuery(t: Thread, q: ParsedQuery, labels: Label[], now: nu
     if (!hit) return false;
   }
   if (q.filename) {
-    const hit = t.messages.some((m) => m.attachments.some((a) => a.filename.toLowerCase().includes(q.filename!)));
+    const hit = t.messages.some((m) =>
+      m.attachments.some((a) => a.filename.toLowerCase().includes(q.filename!)),
+    );
     if (!hit) return false;
   }
-  if (q.has.includes("attachment") && !t.messages.some((m) => m.attachments.length > 0)) return false;
+  if (q.has.includes("attachment") && !t.messages.some((m) => m.attachments.length > 0))
+    return false;
   if (q.is.includes("unread") && !t.unread) return false;
   if (q.is.includes("read") && t.unread) return false;
   if (q.is.includes("starred") && !t.starred) return false;
@@ -751,11 +832,18 @@ export function visibleThreads(opts: {
       } else if (forced) {
         if (!inFolder(t, forced, opts.now, mine)) return false;
       } else if (!inFolder(t, opts.folder, opts.now, mine)) {
-        const mix = Boolean(opts.showDone && opts.folder === "inbox" && isDone(t) && !isSnoozed(t, opts.now));
+        const mix = Boolean(
+          opts.showDone && opts.folder === "inbox" && isDone(t) && !isSnoozed(t, opts.now),
+        );
         if (!mix) return false;
       }
       const folderForTabs = forced ?? (anywhere ? "all" : opts.folder);
-      if (!parsed.in && folderForTabs === "inbox" && opts.category !== "all" && t.category !== opts.category) {
+      if (
+        !parsed.in &&
+        folderForTabs === "inbox" &&
+        opts.category !== "all" &&
+        t.category !== opts.category
+      ) {
         return false;
       }
       return matchesQuery(t, parsed, opts.labels, opts.now);
@@ -768,9 +856,17 @@ export function visibleThreads(opts: {
     });
 }
 
-export function unreadIn(threads: Thread[], folder: FolderId, now: number, aliases: Alias[], account: AccountId = "grokbot"): number {
+export function unreadIn(
+  threads: Thread[],
+  folder: FolderId,
+  now: number,
+  aliases: Alias[],
+  account: AccountId = "grokbot",
+): number {
   const mine = mineSet(aliases);
-  return threads.filter((t) => accountOf(t) === account && t.unread && inFolder(t, folder, now, mine)).length;
+  return threads.filter(
+    (t) => accountOf(t) === account && t.unread && inFolder(t, folder, now, mine),
+  ).length;
 }
 
 export function categoryCount(
@@ -782,7 +878,11 @@ export function categoryCount(
 ): number {
   const mine = mineSet(aliases);
   return threads.filter(
-    (t) => accountOf(t) === account && t.unread && t.category === category && inFolder(t, "inbox", now, mine),
+    (t) =>
+      accountOf(t) === account &&
+      t.unread &&
+      t.category === category &&
+      inFolder(t, "inbox", now, mine),
   ).length;
 }
 
@@ -831,7 +931,10 @@ export function applyAct(t: Thread, kind: ActKind, now = Date.now()): Thread {
 
 export function applyFilters(thread: Thread, filters: Filter[]): Thread {
   let t = thread;
-  const froms = t.messages.map((m) => `${m.from.name} ${m.from.email}`).join(" ").toLowerCase();
+  const froms = t.messages
+    .map((m) => `${m.from.name} ${m.from.email}`)
+    .join(" ")
+    .toLowerCase();
   const subject = t.subject.toLowerCase();
   for (const f of filters) {
     if (!f.enabled) continue;
@@ -841,7 +944,12 @@ export function applyFilters(thread: Thread, filters: Filter[]): Thread {
     if (f.star) t = { ...t, starred: true };
     if (f.markRead) t = { ...t, unread: false };
     if (f.archive && t.location === "inbox") {
-      t = { ...t, location: "archive", snoozeUntil: null, doneAt: t.doneAt ?? new Date().toISOString() };
+      t = {
+        ...t,
+        location: "archive",
+        snoozeUntil: null,
+        doneAt: t.doneAt ?? new Date().toISOString(),
+      };
     }
   }
   return t;
@@ -873,7 +981,11 @@ function uniqueAddresses(list: Address[]): Address[] {
   return out;
 }
 
-export function replyFields(message: Message, mode: "reply" | "replyAll" | "forward", mine: Set<string>) {
+export function replyFields(
+  message: Message,
+  mode: "reply" | "replyAll" | "forward",
+  mine: Set<string>,
+) {
   if (mode === "forward") {
     const header = [
       "---------- Forwarded message ----------",
@@ -884,10 +996,10 @@ export function replyFields(message: Message, mode: "reply" | "replyAll" | "forw
       "",
       message.body,
     ].join("\n");
-    return { to: "", cc: "", subject: reSubject(message.subject, "Fwd"), body: `\n\n${header}` };
+    return { to: "", cc: "", subject: reSubject(message.subject, "Fwd"), body: header };
   }
   const subject = reSubject(message.subject, "Re");
-  const quoted = `\n\n${quoteMessage(message)}`;
+  const quoted = quoteMessage(message);
   if (mode === "reply") {
     const toMine = mine.has(message.from.email.toLowerCase());
     const to = toMine ? message.to.map(formatAddress).join(", ") : formatAddress(message.from);
@@ -901,45 +1013,154 @@ export function replyFields(message: Message, mode: "reply" | "replyAll" | "forw
   return { to, cc: ccs.map(formatAddress).join(", "), subject, body: quoted };
 }
 
-export function withSignature(body: string, signature: string): string {
-  const sig = signature.trim();
-  if (!sig) return body;
-  if (body.includes(sig)) return body;
-  return `${body.replace(/\s*$/, "")}\n\n--\n${sig}`;
+function normalizedText(text: string): string {
+  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-const SIGNATURE_MARK = /^(?:--|—|–)\s*$/;
+function normalizedSignature(signature: string): string {
+  return normalizedText(signature)
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/, ""))
+    .join("\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "");
+}
 
-/** Body text that is not a trailing signature or a lone `--` line. */
+/**
+ * The letter, then the profile signature exactly as written in Settings, then an optional quote.
+ * An empty letter leaves two blank lines above the signature for typing.
+ */
+export function composeDocument(letter: string, signature: string, quoted = ""): string {
+  const typed = normalizedText(letter)
+    .replace(/[ \t]+$/g, "")
+    .replace(/\n+$/g, "");
+  const block = normalizedSignature(signature);
+  const tail = normalizedText(quoted).replace(/^\n+/, "").replace(/\n+$/g, "");
+  const parts = [block, tail].filter((part) => part !== "");
+  if (!typed) return parts.length ? `\n\n${parts.join("\n\n")}` : "\n\n";
+  return [typed, ...parts].join("\n\n");
+}
+
+export function attachmentDraftKey(files: readonly { filename: string; bytes: number }[]): string {
+  return files.map((file) => `${file.filename}\0${file.bytes}`).join("\n");
+}
+
+const LEGACY_SIGNATURE_MARK = /^(?:--|\u2014|\u2013)\s*$/;
+
+/** Line index where the signature block starts in the body, or -1. Trailing spaces are ignored. */
+export function signatureBlockAt(body: string, signature: string): number {
+  const sigLines = normalizedSignature(signature)
+    .split("\n")
+    .map((line) => line.trim());
+  if (sigLines.length === 0 || sigLines.every((line) => line === "")) return -1;
+  const lines = normalizedText(body).split("\n");
+  for (let i = 0; i + sigLines.length <= lines.length; i++) {
+    if (sigLines.every((line, index) => (lines[i + index] ?? "").trim() === line)) return i;
+  }
+  return -1;
+}
+
+/** A reply or forward quote line that the signature sits above. */
+function isQuoteHead(line: string): boolean {
+  const trimmed = line.trim();
+  if (/^-{3,}\s*Forwarded message\s*-{3,}$/i.test(trimmed)) return true;
+  return trimmed.length <= 240 && /^on\s+\S.+\bwrote:\s*$/i.test(trimmed);
+}
+
+/**
+ * Drafts saved before the editor carried the signature have none in the body.
+ * Put the signature under the letter and above the quote, once. A body that
+ * already holds the signature is returned as is.
+ */
+export function signLegacyDraftBody(body: string, signature: string): string {
+  if (!normalizedSignature(signature)) return body;
+  if (signatureBlockAt(body, signature) >= 0) return body;
+  const lines = normalizedText(body).split("\n");
+  const head = lines.findIndex(isQuoteHead);
+  const letter = head >= 0 ? lines.slice(0, head).join("\n") : lines.join("\n");
+  const quoted = head >= 0 ? lines.slice(head).join("\n") : "";
+  return composeDocument(letter, signature, quoted);
+}
+
+/**
+ * Letter the person typed above the signature.
+ * The profile signature block wins, then a standard `-- ` line.
+ * Legacy drafts still drop a trailing `--` plus the saved signature.
+ */
 export function bodyBeyondSignature(body: string, signature: string): string {
-  const sigLines = signature.trim()
-    ? signature.replace(/\r\n/g, "\n").trim().split("\n").map((line) => line.trim())
+  const lines = normalizedText(body).split("\n");
+  let block = signatureBlockAt(body, signature);
+  // A saved signature without its own `--` line still sat under one in older sends.
+  if (block > 0 && LEGACY_SIGNATURE_MARK.test(lines[block - 1] ?? "")) block -= 1;
+  if (block >= 0) return lines.slice(0, block).join("\n").trim();
+  const standard = lines.findIndex((line) => line === "-- ");
+  if (standard >= 0) return lines.slice(0, standard).join("\n").trim();
+
+  const sigLines = normalizedSignature(signature)
+    ? normalizedSignature(signature)
+        .split("\n")
+        .map((line) => line.trim())
     : [];
-  let lines = body.replace(/\r\n/g, "\n").split("\n");
+  let rest = lines;
   const trimEnd = () => {
-    while (lines.length > 0 && lines[lines.length - 1]?.trim() === "") lines.pop();
+    while (rest.length > 0 && rest[rest.length - 1]?.trim() === "") rest.pop();
   };
   for (let guard = 0; guard < 6; guard += 1) {
     trimEnd();
-    if (lines.length === 0) break;
-    const last = lines[lines.length - 1]?.trim() ?? "";
-    if (SIGNATURE_MARK.test(last)) {
-      lines.pop();
+    if (rest.length === 0) break;
+    const last = rest[rest.length - 1]?.trim() ?? "";
+    if (LEGACY_SIGNATURE_MARK.test(last)) {
+      rest.pop();
       continue;
     }
-    if (sigLines.length > 0 && lines.length >= sigLines.length) {
-      const start = lines.length - sigLines.length;
-      const match = sigLines.every((line, index) => lines[start + index]?.trim() === line);
+    if (sigLines.length > 0 && rest.length >= sigLines.length) {
+      const start = rest.length - sigLines.length;
+      const match = sigLines.every((line, index) => rest[start + index]?.trim() === line);
       if (match) {
-        lines = lines.slice(0, start);
+        rest = rest.slice(0, start);
         continue;
       }
     }
     break;
   }
-  const rest = lines.join("\n").trim();
-  if (SIGNATURE_MARK.test(rest)) return "";
-  return rest;
+  const text = rest.join("\n").trim();
+  if (LEGACY_SIGNATURE_MARK.test(text)) return "";
+  return text;
+}
+
+function comparableBody(body: string): string {
+  return normalizedText(body)
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/, ""))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * Close and autosave keep a draft when the person changed anything they can see:
+ * the recipients, the subject, the files, or any text in the body, the
+ * signature and the quote included. An untouched seeded compose is not a draft.
+ */
+export function composeShouldSave(fields: {
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+  attachments: readonly { filename: string; bytes: number }[];
+  seedTo: string;
+  seedCc: string;
+  seedBcc: string;
+  seedSubject: string;
+  seedBody: string;
+  seedAttachmentKey: string;
+}): boolean {
+  if (attachmentDraftKey(fields.attachments) !== fields.seedAttachmentKey) return true;
+  if (fields.to.trim() !== fields.seedTo.trim()) return true;
+  if (fields.cc.trim() !== fields.seedCc.trim()) return true;
+  if (fields.bcc.trim() !== fields.seedBcc.trim()) return true;
+  if (fields.subject.trim() !== fields.seedSubject.trim()) return true;
+  return comparableBody(fields.body) !== comparableBody(fields.seedBody);
 }
 
 /**
@@ -959,7 +1180,12 @@ export function shouldPersistDraft(
 ): boolean {
   if (bodyBeyondSignature(fields.body ?? "", signature).trim() !== "") return true;
   if ((fields.attachments?.length ?? 0) > 0) return true;
-  if ((fields.to ?? "").trim() || (fields.cc ?? "").trim() || (fields.bcc ?? "").trim() || (fields.subject ?? "").trim()) {
+  if (
+    (fields.to ?? "").trim() ||
+    (fields.cc ?? "").trim() ||
+    (fields.bcc ?? "").trim() ||
+    (fields.subject ?? "").trim()
+  ) {
     return true;
   }
   return false;
@@ -971,7 +1197,9 @@ export function savedDraftThreadId(
   threadId: string | null,
 ): string | null {
   if (threadId && threads.some((thread) => thread.id === threadId)) return threadId;
-  const match = threads.find((thread) => thread.draft?.updatedAt === draft.updatedAt && thread.draft.body === draft.body);
+  const match = threads.find(
+    (thread) => thread.draft?.updatedAt === draft.updatedAt && thread.draft.body === draft.body,
+  );
   return match?.id ?? null;
 }
 
@@ -1008,7 +1236,9 @@ export function hideThreadIds(data: MailData, ids: readonly string[]): MailData 
   };
 }
 
-export function snoozePresets(now = Date.now()): { id: string; label: string; hint: string; at: number }[] {
+export function snoozePresets(
+  now = Date.now(),
+): { id: string; label: string; hint: string; at: number }[] {
   const later = new Date(now);
   later.setHours(18, 0, 0, 0);
   if (later.getTime() < now + 3_600_000) later.setDate(later.getDate() + 1);
@@ -1020,11 +1250,26 @@ export function snoozePresets(now = Date.now()): { id: string; label: string; hi
   monday.setDate(monday.getDate() + (day === 0 ? 1 : day === 1 ? 7 : 8 - day));
   monday.setHours(8, 0, 0, 0);
   return [
-    { id: "1h", label: "One hour", hint: format(new Date(now + 3_600_000), "h:mm a"), at: now + 3_600_000 },
+    {
+      id: "1h",
+      label: "One hour",
+      hint: format(new Date(now + 3_600_000), "h:mm a"),
+      at: now + 3_600_000,
+    },
     { id: "later", label: "Later today", hint: format(later, "EEE h:mm a"), at: later.getTime() },
-    { id: "tom", label: "Tomorrow morning", hint: format(tomorrow, "EEE h:mm a"), at: tomorrow.getTime() },
+    {
+      id: "tom",
+      label: "Tomorrow morning",
+      hint: format(tomorrow, "EEE h:mm a"),
+      at: tomorrow.getTime(),
+    },
     { id: "mon", label: "Next Monday", hint: format(monday, "MMM d"), at: monday.getTime() },
-    { id: "week", label: "One week", hint: format(new Date(now + 7 * 86_400_000), "MMM d"), at: now + 7 * 86_400_000 },
+    {
+      id: "week",
+      label: "One week",
+      hint: format(new Date(now + 7 * 86_400_000), "MMM d"),
+      at: now + 7 * 86_400_000,
+    },
   ];
 }
 
@@ -1123,7 +1368,8 @@ export function sealMessages(messages: SeedMessage[], plusTag: string | null): M
   const ids = messages.map((m) => m.messageId ?? `<${m.id}@${DEMO_DOMAIN}>`);
   return messages.map((m, index) => {
     const prior = ids.slice(0, index);
-    const deliveredTo = m.deliveredTo ?? (plusTag ? aliasAddress(plusTag) : m.to[0]?.email ?? DEMO_ADDRESS);
+    const deliveredTo =
+      m.deliveredTo ?? (plusTag ? aliasAddress(plusTag) : (m.to[0]?.email ?? DEMO_ADDRESS));
     return {
       delivery: null,
       clientSendId: null,
@@ -1132,7 +1378,8 @@ export function sealMessages(messages: SeedMessage[], plusTag: string | null): M
       bcc: m.bcc ?? [],
       attachments: m.attachments ?? [],
       messageId: ids[index] ?? null,
-      inReplyTo: m.inReplyTo === undefined ? (index > 0 ? prior[index - 1] ?? null : null) : m.inReplyTo,
+      inReplyTo:
+        m.inReplyTo === undefined ? (index > 0 ? (prior[index - 1] ?? null) : null) : m.inReplyTo,
       references: m.references ?? prior,
       deliveredTo,
       account: m.account ?? "primary",
@@ -1180,4 +1427,3 @@ export function emptyMailbox(): MailData {
 export function snapshotOf(data: MailData): MailData {
   return structuredClone(data);
 }
-

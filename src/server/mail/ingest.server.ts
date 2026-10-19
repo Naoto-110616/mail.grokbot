@@ -2,6 +2,7 @@ import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { classifyThread } from "../../lib/mail/category.ts";
 import { attachmentContentBase64, type Address, type Alias, type Attachment, type Message, type Thread } from "../../lib/mail/model.ts";
+import { dedupeSentCopies } from "../../lib/mail/sent-copies.ts";
 import { groupByHeaders, normalizeMessageId, threadPlusTag } from "../../lib/mail/threading.ts";
 
 export type IngestIdentity = {
@@ -557,7 +558,7 @@ export async function loadIngest(dir: string): Promise<IngestLoad> {
     mergeLooseAttachment(messages, extra.attachment, extra.messageId);
   }
 
-  const withResults = applySendResults(messages, sendResults);
+  const withResults = applySendResults(dedupeSentCopies(messages).messages, sendResults);
   return {
     identity,
     messages: withResults,

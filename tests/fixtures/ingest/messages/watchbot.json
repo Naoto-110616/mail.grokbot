@@ -1,10 +1,10 @@
 {
   "kind": "message",
-  "id": "msg_botbagger",
-  "messageId": "<botbagger@example.test>",
-  "from": { "name": "BotBagger", "email": "watcher@example.com" },
+  "id": "msg_watchbot",
+  "messageId": "<watchbot@example.test>",
+  "from": { "name": "WatchBot", "email": "watcher@example.com" },
   "to": [{ "name": "You", "email": "you@example.test" }],
-  "subject": "Alert: bagger offline",
+  "subject": "Alert: sensor offline",
   "body": "Sensor 3 stopped reporting.",
   "date": "2026-10-19T16:00:00.000Z",
   "unread": true

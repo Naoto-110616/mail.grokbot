@@ -2,16 +2,17 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pingView } from "../../lib/mail/wake-retry.ts";
 import { pingWebhook, type WebhookBody } from "../../lib/mail/webhook-body.ts";
+import { demoMode } from "../../lib/env.server.ts";
 import { webhookTarget, type MailSecrets } from "./config.server.ts";
 
 const TIMEOUT_MS = 8_000;
 
 export type DeliverResult =
-  | { ok: true; status: 200 }
-  | { ok: false; status: number | null; error: string };
+  { ok: true; status: 200 } | { ok: false; status: number | null; error: string };
 
 function failureName(err: unknown): "timeout" | "network" {
-  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) return "timeout";
+  if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError"))
+    return "timeout";
   return "network";
 }
 
@@ -59,16 +60,24 @@ export async function deliverWebhook(
   }
 }
 
-export async function deliverConfigured(body: WebhookBody, root = process.cwd()): Promise<DeliverResult> {
+export async function deliverConfigured(
+  body: WebhookBody,
+  root = process.cwd(),
+): Promise<DeliverResult> {
   const target = await webhookTarget(root);
   if (!target) return { ok: false, status: null, error: "unconfigured" };
   return deliverWebhook(target, body, { outboxPath: join(root, "data", "outbox.log") });
 }
 
 /** POST `{ action: "ping" }` to the saved connection. The browser receives status and a safe reason. */
-export async function pingBot(root = process.cwd()): Promise<{ status: number | null; reason: string | null }> {
+export async function pingBot(
+  root = process.cwd(),
+): Promise<{ status: number | null; reason: string | null }> {
+  if (demoMode()) return { status: null, reason: "Sample mailbox. No bot is connected." };
   const target = await webhookTarget(root);
   if (!target) return pingView({ ok: false, status: null, error: "unconfigured" });
-  const result = await deliverWebhook(target, pingWebhook(), { outboxPath: join(root, "data", "outbox.log") });
+  const result = await deliverWebhook(target, pingWebhook(), {
+    outboxPath: join(root, "data", "outbox.log"),
+  });
   return pingView(result);
 }

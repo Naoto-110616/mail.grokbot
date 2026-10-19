@@ -20,7 +20,15 @@ import {
   activityIso,
 } from "@/lib/mail/model";
 import { outboxStatusLabel, type OutboxItem } from "@/lib/mail/outbox";
-import { actionForReveal, revealSwipe, swipeActionLabel, swipePrefsOf, swipeTone, type SwipeAction } from "@/lib/mail/swipe";
+import {
+  actionForReveal,
+  revealSwipe,
+  swipeActionLabel,
+  swipePrefsOf,
+  swipeTone,
+  type SwipeAction,
+} from "@/lib/mail/swipe";
+import { SAMPLE_NOTE } from "@/lib/mail/demo-mailbox";
 import { useMail } from "@/lib/mail/store";
 
 export function ThreadList({
@@ -140,18 +148,31 @@ export function ThreadList({
   const readAction = readKind(chosen);
   const starAction = starKind(chosen);
   const conversationCount = rows.length;
-  const senderCards = pendingCards(threads.filter((thread) => (thread.account ?? "grokbot") === account));
-  const showStrip = folder === "inbox" && !query && !gateList && gate.mode === "before" && senderCards.length > 0;
+  const senderCards = pendingCards(
+    threads.filter((thread) => (thread.account ?? "grokbot") === account),
+  );
+  const showStrip =
+    folder === "inbox" && !query && !gateList && gate.mode === "before" && senderCards.length > 0;
 
   if (folder === "outbox") {
-    return <OutboxList items={outbox} onOpen={onOpenOutbox} onCancel={cancelOutbox} onRetry={retryOutbox} onCheck={checkMail} />;
+    return (
+      <OutboxList
+        items={outbox}
+        onOpen={onOpenOutbox}
+        onCancel={cancelOutbox}
+        onRetry={retryOutbox}
+        onCheck={checkMail}
+      />
+    );
   }
 
   return (
     <section className="paper flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden rounded-none lg:w-96 lg:flex-none lg:rounded-3xl">
       <header className="flex min-w-0 max-w-full items-center gap-1 border-b border-line py-1 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold">{query ? "Search" : folderLabel(folder, labels)}</h1>
+          <h1 className="truncate text-base font-semibold">
+            {query ? "Search" : folderLabel(folder, labels)}
+          </h1>
           <p className="truncate text-sm text-muted">
             {conversationCount} conversation{conversationCount === 1 ? "" : "s"}
             {query ? ` · ${query}` : ""}
@@ -162,10 +183,16 @@ export function ThreadList({
             <IconButton label="Done" onClick={() => act("archive")}>
               <Check className="size-5" strokeWidth={1.75} />
             </IconButton>
-            <IconButton label={readAction === "unread" ? "Unread" : "Read"} onClick={() => act(readAction)}>
+            <IconButton
+              label={readAction === "unread" ? "Unread" : "Read"}
+              onClick={() => act(readAction)}
+            >
               <MailOpen className="size-5" strokeWidth={1.75} />
             </IconButton>
-            <IconButton label={starAction === "starOff" ? "Unstar" : "Star"} onClick={() => act(starAction)}>
+            <IconButton
+              label={starAction === "starOff" ? "Unstar" : "Star"}
+              onClick={() => act(starAction)}
+            >
               <Star className="size-5" strokeWidth={1.75} />
             </IconButton>
             <IconButton label="Snooze" onClick={() => setSnooze(true)}>
@@ -180,12 +207,20 @@ export function ThreadList({
           </div>
         )}
         {checked.length === 0 && folder === "trash" && (
-          <button type="button" className="h-11 rounded-full px-3 text-base font-medium text-danger" onClick={emptyFolder}>
+          <button
+            type="button"
+            className="h-11 rounded-full px-3 text-base font-medium text-danger"
+            onClick={emptyFolder}
+          >
             Empty
           </button>
         )}
         {checked.length === 0 && folder === "spam" && (
-          <button type="button" className="h-11 rounded-full px-3 text-base font-medium text-danger" onClick={emptyFolder}>
+          <button
+            type="button"
+            className="h-11 rounded-full px-3 text-base font-medium text-danger"
+            onClick={emptyFolder}
+          >
             Empty
           </button>
         )}
@@ -211,7 +246,11 @@ export function ThreadList({
             Cancel
           </button>
         ) : (
-          <button type="button" className="h-11 shrink-0 rounded-full px-3 text-base font-semibold text-accent" onClick={() => setSelecting(true)}>
+          <button
+            type="button"
+            className="h-11 shrink-0 rounded-full px-3 text-base font-semibold text-accent"
+            onClick={() => setSelecting(true)}
+          >
             Select
           </button>
         )}
@@ -221,6 +260,7 @@ export function ThreadList({
           </IconButton>
         )}
       </header>
+      <SampleBanner />
       {folder === "inbox" && !query && (
         <div className="flex min-w-0 max-w-full gap-1 overflow-x-auto py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
           {!showChecks && (
@@ -284,7 +324,11 @@ export function ThreadList({
         className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-[calc(5.375rem+env(safe-area-inset-bottom))] lg:pb-2"
         onPointerDown={(event) => {
           if (!box.current || box.current.scrollTop > 0) return;
-          if (event.target instanceof Element && event.target.closest(".row, button, a, input, label")) return;
+          if (
+            event.target instanceof Element &&
+            event.target.closest(".row, button, a, input, label")
+          )
+            return;
           pullY.current = event.clientY;
         }}
         onPointerUp={(event) => {
@@ -301,8 +345,18 @@ export function ThreadList({
             onAccept={(email) => decideSenders([email], "accepted")}
             onBlock={(email) => decideSenders([email], "blocked")}
             onDomain={blockSenderDomain}
-            onAcceptAll={() => decideSenders(senderCards.map((card) => card.email), "accepted")}
-            onBlockAll={() => decideSenders(senderCards.map((card) => card.email), "blocked")}
+            onAcceptAll={() =>
+              decideSenders(
+                senderCards.map((card) => card.email),
+                "accepted",
+              )
+            }
+            onBlockAll={() =>
+              decideSenders(
+                senderCards.map((card) => card.email),
+                "blocked",
+              )
+            }
           />
         ) : picture.kind === "fresh" ? (
           <FreshAddress address={picture.address} />
@@ -319,11 +373,20 @@ export function ThreadList({
           <ul>
             {rows.map((thread, index) => {
               const sender = listSender(thread, mine);
-              const when = formatWhen(thread.draft?.updatedAt && thread.messages.length === 0 ? thread.draft.updatedAt : activityIso(thread));
+              const when = formatWhen(
+                thread.draft?.updatedAt && thread.messages.length === 0
+                  ? thread.draft.updatedAt
+                  : activityIso(thread),
+              );
               const chips = thread.labels.map((id) => labelById.get(id)).filter((l) => l != null);
               const snippet = snippetOf(thread);
               const draftMark = Boolean(thread.draft && thread.messages.length > 0);
-              const rowPad = density === "compact" ? "h-14 items-center" : density === "cozy" ? "h-[76px] items-center" : "items-start py-1.5";
+              const rowPad =
+                density === "compact"
+                  ? "h-14 items-center"
+                  : density === "cozy"
+                    ? "h-[76px] items-center"
+                    : "items-start py-1.5";
               const done = isDone(thread);
               return (
                 <li key={thread.id}>
@@ -332,7 +395,10 @@ export function ThreadList({
                     preview={(dx) => {
                       const reveal = revealSwipe(dx);
                       const action = reveal ? actionForReveal(swipePrefs, reveal) : "done";
-                      return { label: swipeActionLabel(action, thread.unread), className: swipeTone(action) };
+                      return {
+                        label: swipeActionLabel(action, thread.unread),
+                        className: swipeTone(action),
+                      };
                     }}
                     onSwipeLock={() => {
                       clearPress();
@@ -348,115 +414,77 @@ export function ThreadList({
                       });
                     }}
                   >
-                  <div
-                    id={`thread-${thread.id}`}
-                    role="button"
-                    tabIndex={0}
-                    data-active={openId === thread.id}
-                    data-cursor={cursor === index}
-                    data-done={done}
-                    className={`row group flex w-full min-w-0 max-w-full gap-2 border-b border-line text-left pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] ${rowPad}`}
-                    onPointerDown={(event) => armPress(event, thread.id, index)}
-                    onPointerMove={movePress}
-                    onPointerUp={clearPress}
-                    onPointerCancel={clearPress}
-                    onPointerLeave={clearPress}
-                    onContextMenu={(event) => event.preventDefault()}
-                    onClick={() => {
-                      if (skipClick.current) {
-                        skipClick.current = false;
-                        return;
-                      }
-                      if (showChecks) {
-                        toggleCheck(thread.id, index);
-                        return;
-                      }
-                      onOpen(thread.id);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") onOpen(thread.id);
-                    }}
-                  >
-                    {showChecks && (
-                      <label className="inline-flex size-9 shrink-0 items-center justify-center" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${thread.subject || "conversation"}`}
-                          checked={checked.includes(thread.id)}
-                          onChange={(e) => {
-                            if (e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey) shiftCheck(index, ids);
-                            else toggleCheck(thread.id, index);
-                          }}
-                        />
-                      </label>
-                    )}
-                    {density !== "compact" && (
-                      <Monogram
-                        className="size-10"
-                        name={sender.replace(/^To:\s*/, "")}
-                        email={thread.messages[0]?.from.email ?? "draft"}
-                      />
-                    )}
-                    {density === "compact" ? (
-                      <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-                        {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
-                        <span className="min-w-0 flex-1 truncate text-sm font-bold leading-5">
-                          {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
-                          {thread.subject ? <span className="font-normal text-muted"> · {thread.subject}</span> : null}
-                        </span>
-                        <span className="max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
-                        <RowActions
-                          thread={thread}
-                          chips={chips}
-                          folder={folder}
-                          onAccept={() => {
-                            const email = inboundSenders(thread).at(-1);
-                            if (email) decideSenders([email], "accepted");
-                          }}
-                          onStar={() => act("star", [thread.id])}
-                          onDone={() => act("archive", [thread.id])}
-                          onForever={() => setForeverId(thread.id)}
-                        />
-                      </span>
-                    ) : density === "cozy" ? (
-                      <span className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
-                        <span className="flex min-w-0 items-center gap-1.5 leading-5">
-                          {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
-                          <span className="min-w-0 truncate text-sm font-bold leading-5">
-                            {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
-                          </span>
-                          <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
-                        </span>
-                        <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
-                          <span className="min-w-0 flex-1 truncate text-sm font-bold leading-5">{thread.subject || "(no subject)"}</span>
-                          <RowActions
-                            thread={thread}
-                            chips={chips}
-                            folder={folder}
-                            onAccept={() => {
-                              const email = inboundSenders(thread).at(-1);
-                              if (email) decideSenders([email], "accepted");
+                    <div
+                      id={`thread-${thread.id}`}
+                      role="button"
+                      tabIndex={0}
+                      data-active={openId === thread.id}
+                      data-cursor={cursor === index}
+                      data-done={done}
+                      className={`row group flex w-full min-w-0 max-w-full gap-2 border-b border-line text-left pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] ${rowPad}`}
+                      onPointerDown={(event) => armPress(event, thread.id, index)}
+                      onPointerMove={movePress}
+                      onPointerUp={clearPress}
+                      onPointerCancel={clearPress}
+                      onPointerLeave={clearPress}
+                      onContextMenu={(event) => event.preventDefault()}
+                      onClick={() => {
+                        if (skipClick.current) {
+                          skipClick.current = false;
+                          return;
+                        }
+                        if (showChecks) {
+                          toggleCheck(thread.id, index);
+                          return;
+                        }
+                        onOpen(thread.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") onOpen(thread.id);
+                      }}
+                    >
+                      {showChecks && (
+                        <label
+                          className="inline-flex size-9 shrink-0 items-center justify-center"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${thread.subject || "conversation"}`}
+                            checked={checked.includes(thread.id)}
+                            onChange={(e) => {
+                              if (e.nativeEvent instanceof MouseEvent && e.nativeEvent.shiftKey)
+                                shiftCheck(index, ids);
+                              else toggleCheck(thread.id, index);
                             }}
-                            onStar={() => act("star", [thread.id])}
-                            onDone={() => act("archive", [thread.id])}
-                            onForever={() => setForeverId(thread.id)}
                           />
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="min-w-0 flex-1 overflow-hidden">
-                        <span className="flex min-w-0 items-center gap-1.5 leading-5">
-                          {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
-                          <span className="min-w-0 truncate text-sm font-bold leading-5">
+                        </label>
+                      )}
+                      {density !== "compact" && (
+                        <Monogram
+                          className="size-10"
+                          name={sender.replace(/^To:\s*/, "")}
+                          email={thread.messages[0]?.from.email ?? "draft"}
+                        />
+                      )}
+                      {density === "compact" ? (
+                        <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                          {thread.unread && (
+                            <span
+                              className="size-2 shrink-0 rounded-full bg-accent"
+                              aria-label="Unread"
+                            />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-sm font-bold leading-5">
                             {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
+                            {thread.subject ? (
+                              <span className="font-normal text-muted"> · {thread.subject}</span>
+                            ) : null}
                           </span>
-                          <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
-                        </span>
-                        <span className="block max-w-full truncate text-sm font-bold leading-5">{thread.subject || "(no subject)"}</span>
-                        <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
-                          <span className="min-w-0 flex-1 truncate text-xs leading-4 text-muted">
-                            {draftMark && <span className="text-accent">Draft · </span>}
-                            {snippet}
+                          <span className="max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">
+                            {when}
                           </span>
                           <RowActions
                             thread={thread}
@@ -471,9 +499,80 @@ export function ThreadList({
                             onForever={() => setForeverId(thread.id)}
                           />
                         </span>
-                      </span>
-                    )}
-                  </div>
+                      ) : density === "cozy" ? (
+                        <span className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
+                          <span className="flex min-w-0 items-center gap-1.5 leading-5">
+                            {thread.unread && (
+                              <span
+                                className="size-2 shrink-0 rounded-full bg-accent"
+                                aria-label="Unread"
+                              />
+                            )}
+                            <span className="min-w-0 truncate text-sm font-bold leading-5">
+                              {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
+                            </span>
+                            <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">
+                              {when}
+                            </span>
+                          </span>
+                          <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+                            <span className="min-w-0 flex-1 truncate text-sm font-bold leading-5">
+                              {thread.subject || "(no subject)"}
+                            </span>
+                            <RowActions
+                              thread={thread}
+                              chips={chips}
+                              folder={folder}
+                              onAccept={() => {
+                                const email = inboundSenders(thread).at(-1);
+                                if (email) decideSenders([email], "accepted");
+                              }}
+                              onStar={() => act("star", [thread.id])}
+                              onDone={() => act("archive", [thread.id])}
+                              onForever={() => setForeverId(thread.id)}
+                            />
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="min-w-0 flex-1 overflow-hidden">
+                          <span className="flex min-w-0 items-center gap-1.5 leading-5">
+                            {thread.unread && (
+                              <span
+                                className="size-2 shrink-0 rounded-full bg-accent"
+                                aria-label="Unread"
+                              />
+                            )}
+                            <span className="min-w-0 truncate text-sm font-bold leading-5">
+                              {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
+                            </span>
+                            <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">
+                              {when}
+                            </span>
+                          </span>
+                          <span className="block max-w-full truncate text-sm font-bold leading-5">
+                            {thread.subject || "(no subject)"}
+                          </span>
+                          <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+                            <span className="min-w-0 flex-1 truncate text-xs leading-4 text-muted">
+                              {draftMark && <span className="text-accent">Draft · </span>}
+                              {snippet}
+                            </span>
+                            <RowActions
+                              thread={thread}
+                              chips={chips}
+                              folder={folder}
+                              onAccept={() => {
+                                const email = inboundSenders(thread).at(-1);
+                                if (email) decideSenders([email], "accepted");
+                              }}
+                              onStar={() => act("star", [thread.id])}
+                              onDone={() => act("archive", [thread.id])}
+                              onForever={() => setForeverId(thread.id)}
+                            />
+                          </span>
+                        </span>
+                      )}
+                    </div>
                   </SwipeRow>
                 </li>
               );
@@ -483,9 +582,20 @@ export function ThreadList({
       </div>
       {foreverId && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:items-center">
-          <button type="button" aria-label="Cancel" className="absolute inset-0 bg-ink/30" onClick={() => setForeverId(null)} />
-          <div role="dialog" aria-labelledby="delete-forever-title" className="relative w-full max-w-sm rounded-3xl border border-line bg-paper p-4 shadow-lg">
-            <p id="delete-forever-title" className="text-base font-bold">Delete this conversation forever?</p>
+          <button
+            type="button"
+            aria-label="Cancel"
+            className="absolute inset-0 bg-ink/30"
+            onClick={() => setForeverId(null)}
+          />
+          <div
+            role="dialog"
+            aria-labelledby="delete-forever-title"
+            className="relative w-full max-w-sm rounded-3xl border border-line bg-paper p-4 shadow-lg"
+          >
+            <p id="delete-forever-title" className="text-base font-bold">
+              Delete this conversation forever?
+            </p>
             <p className="mt-1 text-base text-muted">This cannot be undone.</p>
             <div className="mt-4 flex gap-2">
               <button
@@ -498,7 +608,11 @@ export function ThreadList({
               >
                 Delete forever
               </button>
-              <button type="button" className="h-11 flex-1 rounded-full border border-line text-base font-semibold" onClick={() => setForeverId(null)}>
+              <button
+                type="button"
+                className="h-11 flex-1 rounded-full border border-line text-base font-semibold"
+                onClick={() => setForeverId(null)}
+              >
                 Cancel
               </button>
             </div>
@@ -527,13 +641,23 @@ function NewSenderStrip({
       <div className="mb-2 flex items-center gap-2">
         <p className="min-w-0 flex-1 truncate text-sm font-bold">New senders</p>
         <span className="text-sm font-semibold text-accent tabular-nums">{cards.length}</span>
-        <button type="button" className="h-11 rounded-full px-3 text-sm font-semibold text-accent" onClick={onSeeAll}>
+        <button
+          type="button"
+          className="h-11 rounded-full px-3 text-sm font-semibold text-accent"
+          onClick={onSeeAll}
+        >
           See all
         </button>
       </div>
       <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto pb-1">
         {cards.slice(0, 8).map((card) => (
-          <SenderFace key={card.email} card={card} onAccept={onAccept} onBlock={onBlock} onDomain={onDomain} />
+          <SenderFace
+            key={card.email}
+            card={card}
+            onAccept={onAccept}
+            onBlock={onBlock}
+            onDomain={onDomain}
+          />
         ))}
       </div>
     </div>
@@ -560,16 +684,28 @@ function SenderReview({
   return (
     <div className="space-y-3 px-3 py-3">
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="h-11 rounded-full px-3 text-sm font-semibold text-muted" onClick={onBack}>
+        <button
+          type="button"
+          className="h-11 rounded-full px-3 text-sm font-semibold text-muted"
+          onClick={onBack}
+        >
           Back
         </button>
         <p className="min-w-0 flex-1 truncate text-sm font-bold">New senders</p>
         {cards.length > 0 && (
           <>
-            <button type="button" className="h-11 rounded-full bg-accent px-3 text-sm font-semibold text-accent-fg" onClick={onAcceptAll}>
+            <button
+              type="button"
+              className="h-11 rounded-full bg-accent px-3 text-sm font-semibold text-accent-fg"
+              onClick={onAcceptAll}
+            >
               Accept all
             </button>
-            <button type="button" className="h-11 rounded-full bg-ink/5 px-3 text-sm font-semibold text-ink" onClick={onBlockAll}>
+            <button
+              type="button"
+              className="h-11 rounded-full bg-ink/5 px-3 text-sm font-semibold text-ink"
+              onClick={onBlockAll}
+            >
               Block all
             </button>
           </>
@@ -579,7 +715,14 @@ function SenderReview({
         <p className="px-1 py-8 text-center text-sm text-muted">No new senders.</p>
       ) : (
         cards.map((card) => (
-          <SenderFace key={card.email} card={card} wide onAccept={onAccept} onBlock={onBlock} onDomain={onDomain} />
+          <SenderFace
+            key={card.email}
+            card={card}
+            wide
+            onAccept={onAccept}
+            onBlock={onBlock}
+            onDomain={onDomain}
+          />
         ))
       )}
     </div>
@@ -600,7 +743,13 @@ function SenderFace({
   onDomain: (domain: string) => void;
 }) {
   return (
-    <article className={wide ? "rounded-2xl border border-line bg-paper-2 p-3" : "w-64 shrink-0 rounded-2xl border border-line bg-paper-2 p-3"}>
+    <article
+      className={
+        wide
+          ? "rounded-2xl border border-line bg-paper-2 p-3"
+          : "w-64 shrink-0 rounded-2xl border border-line bg-paper-2 p-3"
+      }
+    >
       <div className="flex items-center gap-2">
         <Monogram className="size-10" name={card.name} email={card.email} />
         <span className="min-w-0 flex-1">
@@ -612,13 +761,25 @@ function SenderFace({
       <p className="mt-1 truncate text-sm font-bold">{card.subject}</p>
       {card.preview && <p className="truncate text-xs text-muted">{card.preview}</p>}
       <div className="mt-3 flex flex-wrap gap-1">
-        <button type="button" className="h-11 rounded-full bg-accent px-3 text-sm font-semibold text-accent-fg" onClick={() => onAccept(card.email)}>
+        <button
+          type="button"
+          className="h-11 rounded-full bg-accent px-3 text-sm font-semibold text-accent-fg"
+          onClick={() => onAccept(card.email)}
+        >
           Accept
         </button>
-        <button type="button" className="h-11 rounded-full bg-ink/5 px-3 text-sm font-semibold text-ink" onClick={() => onBlock(card.email)}>
+        <button
+          type="button"
+          className="h-11 rounded-full bg-ink/5 px-3 text-sm font-semibold text-ink"
+          onClick={() => onBlock(card.email)}
+        >
           Block
         </button>
-        <button type="button" className="h-11 rounded-full px-3 text-sm font-medium text-muted" onClick={() => onDomain(emailDomain(card.email))}>
+        <button
+          type="button"
+          className="h-11 rounded-full px-3 text-sm font-medium text-muted"
+          onClick={() => onDomain(emailDomain(card.email))}
+        >
           Block domain
         </button>
       </div>
@@ -709,7 +870,10 @@ function RowActions({
           onStar();
         }}
       >
-        <Star className={thread.starred ? "size-4 fill-brass text-brass" : "size-4 text-faint"} strokeWidth={1.75} />
+        <Star
+          className={thread.starred ? "size-4 fill-brass text-brass" : "size-4 text-faint"}
+          strokeWidth={1.75}
+        />
       </button>
       {folder === "trash" ? (
         <button
@@ -750,7 +914,9 @@ function RowChips({ thread, chips }: { thread: Thread; chips: Label[] }) {
       {chips.map((label) => (
         <LabelChip key={label.id} label={label} className={chipClass} />
       ))}
-      {thread.important && <Bookmark className="size-3.5 shrink-0 text-brass" aria-label="Important" />}
+      {thread.important && (
+        <Bookmark className="size-3.5 shrink-0 text-brass" aria-label="Important" />
+      )}
     </span>
   );
 }
@@ -759,6 +925,14 @@ function byNewest(a: OutboxItem, b: OutboxItem): number {
   const at = b.createdAt.localeCompare(a.createdAt);
   if (at !== 0) return at;
   return b.id.localeCompare(a.id);
+}
+
+function SampleBanner() {
+  const sample = useMail((s) => s.sample === true);
+  if (!sample) return null;
+  return (
+    <p className="border-b border-line px-3 py-2 text-sm leading-5 text-muted">{SAMPLE_NOTE}</p>
+  );
 }
 
 function OutboxList({
@@ -788,17 +962,22 @@ function OutboxList({
           <RefreshCw className="size-5" strokeWidth={1.75} />
         </IconButton>
       </header>
+      <SampleBanner />
       <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-[calc(5.375rem+env(safe-area-inset-bottom))] lg:pb-2">
         {rows.length === 0 ? (
           <div className="flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
-            <p className="wrap-anywhere max-w-full text-xl font-bold text-balance">No mail waiting to send.</p>
+            <p className="wrap-anywhere max-w-full text-xl font-bold text-balance">
+              No mail waiting to send.
+            </p>
           </div>
         ) : (
           <ul>
             {rows.map((item) => {
               const to = item.to.filter(Boolean).join(", ");
               const cc = item.cc.filter(Boolean).join(", ");
-              const who = [to ? `To: ${to}` : "To: —", cc ? `Cc: ${cc}` : ""].filter(Boolean).join(" · ");
+              const who = [to ? `To: ${to}` : "To: —", cc ? `Cc: ${cc}` : ""]
+                .filter(Boolean)
+                .join(" · ");
               return (
                 <li key={item.id} className="min-w-0 max-w-full border-b border-line">
                   <button
@@ -807,11 +986,17 @@ function OutboxList({
                     onClick={() => onOpen(item.id)}
                   >
                     <span className="flex min-w-0 items-baseline gap-2">
-                      <span className="min-w-0 flex-1 truncate text-sm font-bold">{item.subject || "(no subject)"}</span>
-                      <span className="shrink-0 text-xs text-muted tabular-nums">{formatWhen(item.createdAt)}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-bold">
+                        {item.subject || "(no subject)"}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted tabular-nums">
+                        {formatWhen(item.createdAt)}
+                      </span>
                     </span>
                     <span className="block truncate text-base text-muted">{who}</span>
-                    <span className="mt-1 block text-base">{outboxStatusLabel(item.status, item.error)}</span>
+                    <span className="mt-1 block text-base">
+                      {outboxStatusLabel(item.status, item.error)}
+                    </span>
                   </button>
                   {item.status === "queued" ? (
                     <div className="pb-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
@@ -849,7 +1034,11 @@ function Empty({ query, fresh }: { query: string; fresh: boolean }) {
   return (
     <div className="flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
       <p className="wrap-anywhere max-w-full text-xl font-bold text-balance">
-        {fresh ? "No mail yet. Your bot will deliver new mail here." : query ? "No results" : "No messages"}
+        {fresh
+          ? "No mail yet. Your bot will deliver new mail here."
+          : query
+            ? "No results"
+            : "No messages"}
       </p>
     </div>
   );
@@ -859,7 +1048,9 @@ function FreshAddress({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="rise flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
-      <p className="wrap-anywhere max-w-full text-xl font-bold text-balance text-ink">No mail yet. Your bot will deliver new mail here.</p>
+      <p className="wrap-anywhere max-w-full text-xl font-bold text-balance text-ink">
+        No mail yet. Your bot will deliver new mail here.
+      </p>
       <p className="mt-3 max-w-full truncate text-sm text-ink">{address}</p>
       <button
         type="button"
@@ -890,16 +1081,29 @@ function InboxClear({
 }) {
   return (
     <div className="rise flex h-full min-h-64 flex-col items-center justify-center px-8 text-center">
-      <span className="mb-4 inline-flex size-14 items-center justify-center rounded-full bg-accent/15 text-accent" aria-hidden>
+      <span
+        className="mb-4 inline-flex size-14 items-center justify-center rounded-full bg-accent/15 text-accent"
+        aria-hidden
+      >
         <Check className="size-7" strokeWidth={1.75} />
       </span>
       <p className="text-xl font-bold text-ink">Inbox is clear</p>
-      <p className="mt-2 text-sm text-muted">{handled === 1 ? "1 handled today" : `${handled} handled today`}</p>
+      <p className="mt-2 text-sm text-muted">
+        {handled === 1 ? "1 handled today" : `${handled} handled today`}
+      </p>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
-        <button type="button" className="h-11 rounded-full bg-ink/5 px-4 text-sm font-semibold text-ink" onClick={onSnoozed}>
+        <button
+          type="button"
+          className="h-11 rounded-full bg-ink/5 px-4 text-sm font-semibold text-ink"
+          onClick={onSnoozed}
+        >
           Snoozed{snoozeAt ? ` · ${formatWhen(snoozeAt)}` : ""}
         </button>
-        <button type="button" className="h-11 rounded-full bg-ink/5 px-4 text-sm font-semibold text-ink" onClick={onDone}>
+        <button
+          type="button"
+          className="h-11 rounded-full bg-ink/5 px-4 text-sm font-semibold text-ink"
+          onClick={onDone}
+        >
           Done
         </button>
       </div>

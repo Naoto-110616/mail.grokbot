@@ -46,8 +46,8 @@ describe("ingest fixtures", () => {
     assert.equal(plain.ok && plain.kind === "message" && plain.message.listUnsubscribe, undefined);
     const listed = classifyIngestItem({
       kind: "message",
-      id: "msg_printful",
-      from: { name: "Printful", email: "hello@print.example" },
+      id: "msg_printshop",
+      from: { name: "Printshop", email: "hello@print.example" },
       subject: "This week in the shop",
       body: "New colors are in. Unsubscribe any time.",
       headers: [
@@ -110,15 +110,15 @@ describe("ingest fixtures", () => {
     const bytes = await readIngestBytes(fixtures, "files/note.txt");
     assert.equal(bytes?.toString("utf8"), "Notes here\n");
 
-    const promo = threadFor(loaded.threads, "msg_printful");
-    const alert = threadFor(loaded.threads, "msg_botbagger");
+    const promo = threadFor(loaded.threads, "msg_printshop");
+    const alert = threadFor(loaded.threads, "msg_watchbot");
     assert.ok(promo);
     assert.ok(alert);
     assert.equal(promo.category, "promotions");
     assert.equal(promo.messages[0]?.listUnsubscribe, "<mailto:bye@print.example>, <https://print.example/unsub>");
     assert.equal(alert.category, "updates");
-    assert.equal(alert.messages[0]?.from.name, "BotBagger");
-    assert.equal(alert.messages[0]?.subject, "Alert: bagger offline");
+    assert.equal(alert.messages[0]?.from.name, "WatchBot");
+    assert.equal(alert.messages[0]?.subject, "Alert: sensor offline");
   });
 
   it("accepts attachment content under 1 MiB and drops the rest", () => {

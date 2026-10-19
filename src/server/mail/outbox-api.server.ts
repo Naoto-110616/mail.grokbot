@@ -1,4 +1,5 @@
 import type { Sql } from "../../lib/db.ts";
+import { demoMode, sitePassword } from "../../lib/env.server.ts";
 import type { Address, Attachment, Message } from "../../lib/mail/model.ts";
 import {
   outboxTargetFromSendResult,
@@ -44,7 +45,9 @@ function json(status: number, body: unknown, extra?: HeadersInit): Response {
 }
 
 function ingestToken(deps: OutboxApiDeps): string | undefined {
-  const raw = deps.env ? deps.env.INGEST_TOKEN : process.env.INGEST_TOKEN;
+  const raw = deps.env
+    ? deps.env.INGEST_TOKEN
+    : process.env.GBM_INGEST_TOKEN?.trim() || process.env.INGEST_TOKEN;
   if (typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
   return trimmed ? trimmed : undefined;
@@ -61,7 +64,8 @@ function providedBearer(request: Request): string {
 function authorizeBot(request: Request, deps: OutboxApiDeps): Response | null {
   const expected = ingestToken(deps);
   if (!expected) return json(503, { error: "unavailable" });
-  if (!ingestTokenMatches(providedBearer(request), expected)) return json(401, { error: "unauthorized" });
+  if (!ingestTokenMatches(providedBearer(request), expected))
+    return json(401, { error: "unauthorized" });
   return null;
 }
 
@@ -161,11 +165,16 @@ type StatusInput = {
 };
 
 function guardSql(target: OutboxStatus): string {
-  if (target === "awaiting_approval" || target === "cancelled") return "status in ('queued', 'waiting', 'pending')";
+  if (target === "awaiting_approval" || target === "cancelled")
+    return "status in ('queued', 'waiting', 'pending')";
   return "status = 'awaiting_approval'";
 }
 
-async function insertSentMessage(sql: Sql, row: OutboundRow, providerMessageId: string): Promise<void> {
+async function insertSentMessage(
+  sql: Sql,
+  row: OutboundRow,
+  providerMessageId: string,
+): Promise<void> {
   const spec = readSpec(row.spec) ?? {};
   let threadHint: string | null = null;
   let inReplyTo: string | null = null;
@@ -175,7 +184,9 @@ async function insertSentMessage(sql: Sql, row: OutboundRow, providerMessageId: 
       message_id: string | null;
       thread_hint: string | null;
       references_json: string;
-    }>(`select message_id, thread_hint, references_json from mail_message where id = $1`, [row.reply_to_message_id]);
+    }>(`select message_id, thread_hint, references_json from mail_message where id = $1`, [
+      row.reply_to_message_id,
+    ]);
     const parent = found[0];
     if (parent) {
       threadHint = parent.thread_hint || null;
@@ -224,9 +235,17 @@ async function insertSentMessage(sql: Sql, row: OutboundRow, providerMessageId: 
  * One status change. Callers own the transaction.
  * `sent` inserts `msg_<providerMessageId>` and a later ingest of that id updates it.
  */
-export async function transitionOutbound(sql: Sql, id: string, input: StatusInput): Promise<TransitionResult> {
-  if (input.status === "sent" && !input.providerMessageId) return { ok: false, status: 400, error: "invalid" };
-  if (!outboxTransitionAllowed("queued", input.status) && !outboxTransitionAllowed("awaiting_approval", input.status)) {
+export async function transitionOutbound(
+  sql: Sql,
+  id: string,
+  input: StatusInput,
+): Promise<TransitionResult> {
+  if (input.status === "sent" && !input.providerMessageId)
+    return { ok: false, status: 400, error: "invalid" };
+  if (
+    !outboxTransitionAllowed("queued", input.status) &&
+    !outboxTransitionAllowed("awaiting_approval", input.status)
+  ) {
     return { ok: false, status: 400, error: "invalid" };
   }
   const rows = await sql.query<OutboundRow>(
@@ -236,9 +255,15 @@ export async function transitionOutbound(sql: Sql, id: string, input: StatusInpu
   );
   const row = rows[0];
   if (!row) return { ok: false, status: 404, error: "not found" };
-  if (!outboxTransitionAllowed(row.status, input.status)) return { ok: false, status: 409, error: "conflict" };
+  if (!outboxTransitionAllowed(row.status, input.status))
+    return { ok: false, status: 409, error: "conflict" };
 
-  const error = input.status === "failed" ? (input.error ?? "") : input.status === "declined" ? input.error : null;
+  const error =
+    input.status === "failed"
+      ? (input.error ?? "")
+      : input.status === "declined"
+        ? input.error
+        : null;
   const updated = await sql.query<{ client_send_id: string }>(
     `update mail_outbound set
        status = $2,
@@ -252,7 +277,8 @@ export async function transitionOutbound(sql: Sql, id: string, input: StatusInpu
     [id, input.status, input.providerMessageId, error, new Date().toISOString()],
   );
   if (!updated.length) return { ok: false, status: 409, error: "conflict" };
-  if (input.status === "sent" && input.providerMessageId) await insertSentMessage(sql, row, input.providerMessageId);
+  if (input.status === "sent" && input.providerMessageId)
+    await insertSentMessage(sql, row, input.providerMessageId);
   return { ok: true, id, status: input.status };
 }
 
@@ -290,7 +316,11 @@ async function listQueued(sql: Sql): Promise<Response> {
      where status in ('queued', 'waiting', 'pending')
      order by created_at asc, client_send_id asc`,
   );
-  const replyIds = [...new Set(rows.map((row) => row.reply_to_message_id).filter((id): id is string => Boolean(id)))];
+  const replyIds = [
+    ...new Set(
+      rows.map((row) => row.reply_to_message_id).filter((id): id is string => Boolean(id)),
+    ),
+  ];
   const subjects = new Map<string, string>();
   if (replyIds.length > 0) {
     const marks = replyIds.map((_, index) => `$${index + 1}`).join(", ");
@@ -300,7 +330,10 @@ async function listQueued(sql: Sql): Promise<Response> {
     );
     for (const item of found) subjects.set(item.id, item.subject ?? "");
   }
-  return json(200, rows.map((row) => botItem(row, subjects)));
+  return json(
+    200,
+    rows.map((row) => botItem(row, subjects)),
+  );
 }
 
 function cleanProvider(value: unknown): string | null {
@@ -322,7 +355,8 @@ async function readStatusBody(request: Request): Promise<StatusInput | Response>
   } catch {
     return json(400, { error: "invalid" });
   }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return json(400, { error: "invalid" });
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return json(400, { error: "invalid" });
   const row = payload as { status?: unknown; providerMessageId?: unknown; error?: unknown };
   const status = parsePostedStatus(row.status);
   if (!status) return json(400, { error: "invalid" });
@@ -376,7 +410,10 @@ function decodeId(value: string): string | null {
  * `/api/outbox` for the bot (bearer) and cancel for the app (session cookie).
  * The two credentials are not interchangeable.
  */
-export async function handleOutboxApi(request: Request, deps: OutboxApiDeps = {}): Promise<Response> {
+export async function handleOutboxApi(
+  request: Request,
+  deps: OutboxApiDeps = {},
+): Promise<Response> {
   const path = normalizePath(new URL(request.url).pathname);
   const method = request.method.toUpperCase();
 
@@ -418,6 +455,24 @@ export async function handleOutboxApi(request: Request, deps: OutboxApiDeps = {}
   const itemMatch = /^\/api\/outbox\/([^/]+)$/.exec(path);
   if (itemMatch) {
     if (method !== "DELETE") return json(405, { error: "method" }, { allow: "DELETE" });
+    // Live calls pass no sql. Tests that inject sql keep the database path.
+    if (demoMode() && deps.sql === undefined && deps.session === undefined) {
+      if (sitePassword()) {
+        let open = false;
+        try {
+          open = await sessionOpen(request, deps);
+        } catch {
+          open = false;
+        }
+        if (!open) return json(401, { error: "unauthorized" });
+      }
+      const id = decodeId(itemMatch[1] ?? "");
+      if (!id) return json(404, { error: "not found" });
+      const { cancelDemoOutbox } = await import("./demo-state.server.ts");
+      const result = cancelDemoOutbox(id);
+      if (!result.ok) return json(result.status, { error: result.error });
+      return json(200, { id: result.id, status: result.status });
+    }
     let allowed = false;
     try {
       allowed = await sessionOpen(request, deps);

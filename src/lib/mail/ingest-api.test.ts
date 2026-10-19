@@ -572,7 +572,7 @@ describe("ingest api", () => {
       const item = {
         ...message,
         attachments: [] as [],
-        from: { name: "Printful", email: "hello@print.example" },
+        from: { name: "Printshop", email: "hello@print.example" },
         subject: "This week in the shop",
         body: "New colors are in. Unsubscribe any time.",
         headers: [{ name: "List-Unsubscribe", value: "<mailto:bye@print.example>" }],

@@ -577,7 +577,7 @@ function Settings() {
               value={settings.signature}
               onChange={(e) => update({ signature: e.target.value })}
               rows={3}
-              className="w-full rounded-xl border border-line bg-paper-2 px-3 py-2 text-sm outline-none"
+              className="w-full rounded-xl border border-line bg-paper-2 px-3 py-2 text-base outline-none"
             />
           </label>
           <label className="block text-sm">

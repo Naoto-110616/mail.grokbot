@@ -88,7 +88,7 @@ describe("batch select", () => {
     const store = readFileSync(new URL("./store.ts", import.meta.url), "utf8");
     const shell = readFileSync(new URL("../../components/mail/shell.tsx", import.meta.url), "utf8");
     const list = readFileSync(new URL("../../components/mail/thread-list.tsx", import.meta.url), "utf8");
-    assert.match(store, /selectAll: \(ids\) => set\(\{ checked: \[\.\.\.new Set\(ids\)\]/);
+    assert.match(store, /selectAll:\s*\(ids\)\s*=>\s*set\(\{\s*checked:\s*\[\.\.\.new Set\(ids\)\]/);
     assert.match(store, /needsBulkConfirm\(chosen\.length\)/);
     assert.match(store, /starOn/);
     const typing = shell.indexOf("if (isTyping(e.target)) return;");

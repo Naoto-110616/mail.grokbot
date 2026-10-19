@@ -31,7 +31,8 @@ async function waitForHttp(url, child, timeoutMs) {
   const started = Date.now();
   let last = "no response";
   while (Date.now() - started < timeoutMs) {
-    if (child.exitCode != null) throw new Error(`dev server exited (${child.exitCode}) before ${url} answered`);
+    if (child.exitCode != null)
+      throw new Error(`dev server exited (${child.exitCode}) before ${url} answered`);
     try {
       const response = await fetch(url, { redirect: "manual" });
       if (response.status > 0) return;
@@ -79,11 +80,21 @@ test("tapping an Outbox row opens the queued send at 393px", { timeout: 120000 }
   env.MAIL_LOCALHOST_GATE = "open";
   env.DATABASE_URL = "";
   env.DATABASE_URL_UNPOOLED = "";
+  env.GBM_DEMO = "0";
   env.INGEST_TOKEN = "outbox-view-check";
   const logFd = openSync("/tmp/outbox-view-vite.log", "w");
   const child = spawn(
     process.execPath,
-    ["scripts/with-app-env.mjs", "vite", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
+    [
+      "scripts/with-app-env.mjs",
+      "vite",
+      "dev",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(port),
+      "--strictPort",
+    ],
     { cwd: root, env, detached: true, stdio: ["ignore", logFd, logFd] },
   );
   const held = { browser: null };
@@ -151,7 +162,10 @@ test("tapping an Outbox row opens the queued send at 393px", { timeout: 120000 }
     if (new URL(page.url()).pathname === "/login") throw new Error("reload asked for a password");
     await page.getByRole("region", { name: "Queued send" }).waitFor();
     assert.equal(new URL(page.url()).pathname, path);
-    await page.getByRole("region", { name: "Queued send" }).getByText("The tide was quiet.").waitFor();
+    await page
+      .getByRole("region", { name: "Queued send" })
+      .getByText("The tide was quiet.")
+      .waitFor();
 
     const measured = await page.evaluate(() => {
       const innerWidth = window.innerWidth;

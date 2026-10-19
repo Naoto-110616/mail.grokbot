@@ -1,5 +1,5 @@
-import { Bold, Italic, Link2, List, Minus, Paperclip, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Bold, Italic, Link2, List, Minus, Paperclip, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, type PointerEvent } from "react";
 import { IconButton } from "@/components/mail/bits";
 import { recentContacts, mineSet, rememberBlob, uid, type Attachment } from "@/lib/mail/model";
 import { useMail } from "@/lib/mail/store";
@@ -13,11 +13,34 @@ export function Compose() {
   const patch = useMail((s) => s.patchCompose);
   const send = useMail((s) => s.send);
   const dismiss = useMail((s) => s.dismissCompose);
+  const discard = useMail((s) => s.discardCompose);
   const addFiles = useMail((s) => s.addComposeFiles);
   const removeFile = useMail((s) => s.removeComposeFile);
   const autosave = useMail((s) => s.autosaveCompose);
+  const toRef = useRef<HTMLInputElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const gestureFocus = useRef(false);
+  const session = compose
+    ? `${compose.mode}:${compose.threadId ?? ""}:${compose.replyToId ?? ""}:${compose.openedAt}`
+    : "";
+
+  useLayoutEffect(() => {
+    if (!session) return;
+    gestureFocus.current = false;
+    const field = session.startsWith("new:") ? toRef.current : area.current;
+    if (!field) return;
+    field.focus();
+    if (field instanceof HTMLTextAreaElement) field.setSelectionRange(0, 0);
+  }, [session]);
+
+  function openKeyboard(event: PointerEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    const node = event.currentTarget;
+    // Programmatic focus does not open the iOS keyboard. The first tap focuses again inside the gesture.
+    if (document.activeElement === node && !gestureFocus.current) node.blur();
+    gestureFocus.current = true;
+    node.focus();
+  }
 
   useEffect(() => {
     if (!compose) return;
@@ -117,9 +140,16 @@ export function Compose() {
       <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
         <span className="w-16 shrink-0 text-xs text-muted">To</span>
         <input
+          ref={toRef}
+          aria-label="To"
           value={compose.to}
           onChange={(e) => patch({ to: e.target.value })}
+          onPointerDown={openKeyboard}
           placeholder="name@domain"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          inputMode="email"
           className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
         />
         <button type="button" className="text-xs font-medium text-muted" onClick={() => patch({ showCc: !compose.showCc })}>
@@ -132,14 +162,34 @@ export function Compose() {
       {compose.showCc && (
         <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
           <span className="w-16 shrink-0 text-xs text-muted">Cc</span>
-          <input value={compose.cc} onChange={(e) => patch({ cc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none" />
+          <input
+            aria-label="Cc"
+            value={compose.cc}
+            onChange={(e) => patch({ cc: e.target.value })}
+            onPointerDown={openKeyboard}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            inputMode="email"
+            className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
+          />
         </label>
       )}
       {compose.showBcc && (
         <>
           <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
             <span className="w-16 shrink-0 text-xs text-muted">Bcc</span>
-            <input value={compose.bcc} onChange={(e) => patch({ bcc: e.target.value })} className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none" />
+            <input
+              aria-label="Bcc"
+              value={compose.bcc}
+              onChange={(e) => patch({ bcc: e.target.value })}
+              onPointerDown={openKeyboard}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="email"
+              className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
+            />
           </label>
           <p className="px-3 py-2 text-base text-muted">Bcc isn't supported for bot sends yet and will be dropped.</p>
         </>
@@ -147,8 +197,10 @@ export function Compose() {
       <label className="flex min-w-0 max-w-full items-center gap-2 border-b border-line px-3">
         <span className="w-16 shrink-0 text-xs text-muted">Subject</span>
         <input
+          aria-label="Subject"
           value={compose.subject}
           onChange={(e) => patch({ subject: e.target.value })}
+          onPointerDown={openKeyboard}
           className="h-11 w-0 min-w-0 max-w-full flex-1 bg-transparent text-base outline-none"
         />
       </label>
@@ -170,8 +222,10 @@ export function Compose() {
         ref={area}
         value={compose.body}
         onChange={(e) => patch({ body: e.target.value })}
+        onPointerDown={openKeyboard}
         className="mail-body min-h-0 w-full min-w-0 max-w-full flex-1 resize-none bg-transparent px-3 py-3 text-base font-normal leading-relaxed outline-none"
         aria-label="Message"
+        autoCapitalize="sentences"
       />
       {compose.attachments.length > 0 && (
         <ul className="flex flex-wrap gap-2 px-4 pb-2">
@@ -207,9 +261,9 @@ export function Compose() {
           </IconButton>
         </div>
         <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => void onFiles(e.target.files)} />
-        <button type="button" className="h-11 shrink-0 px-3 text-sm text-muted" onClick={dismiss}>
-          Save draft
-        </button>
+        <IconButton label="Discard" onClick={discard}>
+          <Trash2 className="size-5" strokeWidth={1.75} />
+        </IconButton>
       </footer>
     </form>
   );

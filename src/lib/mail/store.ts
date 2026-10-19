@@ -7,7 +7,15 @@ import { fetchPublicMailConfig, retryOutboxSend } from "@/lib/mail/mail-rpc";
 import { needsBulkConfirm } from "@/lib/mail/batch";
 import { upsertSenderRule } from "@/lib/mail/bundles";
 import { applyInboxCategories } from "@/lib/mail/category";
-import { acceptStoredSenders, applyGate, blockDomain, decideSenders as decideSenderBook, gateBookOf, migrateSavedGate, type GateMode } from "@/lib/mail/gate";
+import {
+  acceptStoredSenders,
+  applyGate,
+  blockDomain,
+  decideSenders as decideSenderBook,
+  gateBookOf,
+  migrateSavedGate,
+  type GateMode,
+} from "@/lib/mail/gate";
 import { buildQuickRequest, quickRepliesOf } from "@/lib/mail/quick";
 import { recentSearchesOf, savedSearchesOf } from "@/lib/mail/search";
 import { applyBackendData } from "@/lib/mail/merge";
@@ -16,10 +24,12 @@ import {
   type ActKind,
   type Attachment,
   type Category,
+  type Draft,
   type DraftMode,
   type Filter,
   type FolderId,
   type MailData,
+  type Message,
   type Settings,
   type Swatch,
   type Thread,
@@ -28,17 +38,19 @@ import {
   accountOf,
   activityIso,
   applyAct,
+  attachmentDraftKey,
   clearDraftThread,
+  composeDocument,
+  composeShouldSave,
   emptyMailbox,
   hideThreadIds,
   parseAddressList,
   replyFields,
   savedDraftThreadId,
-  shouldPersistDraft,
+  signLegacyDraftBody,
   snapshotOf,
   uid,
   visibleThreads,
-  withSignature,
 } from "@/lib/mail/model";
 import { DONE_HOLD_MS, DONE_TOAST, popUndo, pushUndo, waitUntilOnline } from "@/lib/mail/done";
 import { outboxEditAsDraftAllowed } from "@/lib/mail/outbox";
@@ -59,6 +71,14 @@ export type ComposeModel = {
   attachments: Attachment[];
   minimized: boolean;
   expanded: boolean;
+  /** Bumps when the editor opens so autofocus runs once per open. */
+  openedAt: number;
+  seedTo: string;
+  seedCc: string;
+  seedBcc: string;
+  seedSubject: string;
+  seedBody: string;
+  seedAttachmentKey: string;
 };
 
 export type ToastModel = {
@@ -149,6 +169,7 @@ type State = MailData &
     editOutboxAsDraft: (id: string) => Promise<boolean>;
     sendQuick: (threadId: string, replyId: string, mode: "reply" | "replyAll") => void;
     dismissCompose: () => void;
+    discardCompose: () => void;
     addFilter: (filter: Omit<Filter, "id">) => void;
     toggleFilter: (id: string) => void;
     deleteFilter: (id: string) => void;
@@ -204,6 +225,7 @@ function dataOf(s: MailData): MailData {
     hiddenThreadIds: s.hiddenThreadIds ?? [],
     outbox: s.outbox ?? [],
     dropOutboxIds: s.dropOutboxIds ?? [],
+    sample: s.sample === true,
   };
 }
 
@@ -211,21 +233,111 @@ function sliceOf(data: MailData) {
   return dataOf(data);
 }
 
-function blankCompose(from: string, _signature: string): ComposeModel {
+let composeSession = 0;
+
+function nextComposeSession(): number {
+  composeSession += 1;
+  return composeSession;
+}
+
+/** Focus a 16px field during the tap that opened compose so iOS can show the keyboard. */
+function primeIosKeyboard() {
+  if (typeof document === "undefined") return;
+  const found = document.getElementById("compose-key");
+  const el = found instanceof HTMLInputElement ? found : document.createElement("input");
+  if (!(found instanceof HTMLInputElement)) {
+    el.id = "compose-key";
+    el.type = "text";
+    el.tabIndex = -1;
+    el.autocomplete = "off";
+    el.setAttribute("aria-hidden", "true");
+    el.setAttribute("inputmode", "text");
+    document.body.appendChild(el);
+  }
+  el.style.position = "fixed";
+  el.style.top = "0";
+  el.style.left = "0";
+  el.style.width = "16px";
+  el.style.height = "16px";
+  el.style.margin = "0";
+  el.style.padding = "0";
+  el.style.border = "0";
+  el.style.opacity = "0";
+  el.style.fontSize = "16px";
+  el.style.transform = "translateY(-32px)";
+  try {
+    el.focus({ preventScroll: true });
+  } catch {
+    el.focus();
+  }
+}
+
+function freshCompose(
+  mode: DraftMode,
+  from: string,
+  signature: string,
+  thread: Thread | null,
+  message: Message | null,
+  mine: Set<string>,
+): ComposeModel {
+  const blank = mode === "new" || !thread || !message;
+  const fields = blank || !message ? null : replyFields(message, mode, mine);
+  const attachments =
+    !blank && message && mode === "forward"
+      ? message.attachments.map((file) => ({ ...file, id: uid() }))
+      : [];
+  const to = fields?.to ?? "";
+  const cc = fields?.cc ?? "";
+  const subject = fields?.subject ?? "";
+  const body = composeDocument("", signature, fields?.body ?? "");
   return {
-    mode: "new",
-    threadId: null,
-    draftThreadId: null,
-    replyToId: null,
+    mode: blank ? "new" : mode,
+    threadId: blank || !thread ? null : thread.id,
+    draftThreadId: blank || !thread ? null : thread.id,
+    replyToId: blank || !message ? null : message.id,
     from,
-    to: "",
-    cc: "",
+    to,
+    cc,
     bcc: "",
-    showCc: false,
+    showCc: Boolean(cc),
     showBcc: false,
-    subject: "",
-    body: "",
-    attachments: [],
+    subject,
+    body,
+    attachments,
+    minimized: false,
+    expanded: false,
+    openedAt: 0,
+    seedTo: to,
+    seedCc: cc,
+    seedBcc: "",
+    seedSubject: subject,
+    seedBody: body,
+    seedAttachmentKey: attachmentDraftKey(attachments),
+  };
+}
+
+function withDraft(
+  base: ComposeModel,
+  thread: Thread,
+  draft: Draft,
+  signature: string,
+): ComposeModel {
+  return {
+    ...base,
+    mode: draft.mode,
+    threadId: thread.messages.length ? thread.id : null,
+    draftThreadId: thread.id,
+    replyToId: draft.replyToId,
+    from: draft.from,
+    to: draft.to,
+    cc: draft.cc,
+    bcc: draft.bcc,
+    showCc: Boolean(draft.cc),
+    showBcc: Boolean(draft.bcc),
+    subject: draft.subject,
+    // The body already holds the signature. Only drafts saved before that get it, once.
+    body: draft.signed ? draft.body : signLegacyDraftBody(draft.body, signature),
+    attachments: draft.attachments,
     minimized: false,
     expanded: false,
   };
@@ -261,7 +373,10 @@ function viewAfter(before: State, threads: Thread[], kind: ActKind, chosen: stri
   let checked = before.checked;
   if (REMOVES.has(kind) || kind === "inbox") {
     const prior = visibleThreads({ threads: before.threads, ...opts });
-    const idx = Math.max(0, prior.findIndex((thread) => thread.id === (before.openId ?? prior[before.cursor]?.id)));
+    const idx = Math.max(
+      0,
+      prior.findIndex((thread) => thread.id === (before.openId ?? prior[before.cursor]?.id)),
+    );
     const after = visibleThreads({ threads, ...opts });
     const next = after[Math.min(idx, Math.max(0, after.length - 1))] ?? null;
     if (openId && setIds.has(openId) && !after.some((thread) => thread.id === openId)) {
@@ -279,7 +394,7 @@ export const useMail = create<State>()(
     (set, get) => {
       let chain = Promise.resolve();
       let actionGen = 0;
-      const enqueue = <T,>(task: () => Promise<T>): Promise<T | undefined> => {
+      const enqueue = <T>(task: () => Promise<T>): Promise<T | undefined> => {
         const run = chain.then(task).catch(() => {
           set({ toast: { text: "Mail action failed", snapshot: null } });
           return undefined;
@@ -288,13 +403,25 @@ export const useMail = create<State>()(
         return run;
       };
 
-      const commit = (incoming: MailData, extras: Partial<State> = {}, options?: { settingsFrom?: "server" }) => {
+      const commit = (
+        incoming: MailData,
+        extras: Partial<State> = {},
+        options?: { settingsFrom?: "server" },
+      ) => {
         const current = dataOf(get());
         const fromServer = options?.settingsFrom === "server";
         const merged =
           get().backendId === "bot-bridge"
-            ? applyBackendData(current, incoming, fromServer ? { settingsFrom: "server" } : undefined)
-            : { ...incoming, settings: fromServer ? incoming.settings : current.settings, gmail: current.gmail };
+            ? applyBackendData(
+                current,
+                incoming,
+                fromServer ? { settingsFrom: "server" } : undefined,
+              )
+            : {
+                ...incoming,
+                settings: fromServer ? incoming.settings : current.settings,
+                gmail: current.gmail,
+              };
         set({ ...sliceOf(merged), ...extras });
       };
 
@@ -346,8 +473,15 @@ export const useMail = create<State>()(
               await fetchPublicMailConfig();
               const current = dataOf(get());
               const incoming = await getActiveBackend().bootstrap(current);
-              const merged = applyBackendData({ ...current, gmail: "off" }, incoming, { settingsFrom: "server" });
-              set({ ...sliceOf(merged), backendId: "bot-bridge", account: "grokbot", gmail: "off" });
+              const merged = applyBackendData({ ...current, gmail: "off" }, incoming, {
+                settingsFrom: "server",
+              });
+              set({
+                ...sliceOf(merged),
+                backendId: "bot-bridge",
+                account: "grokbot",
+                gmail: "off",
+              });
             } catch {
               set({ threads: [], gmail: "off", account: "grokbot", backendId: "bot-bridge" });
             }
@@ -398,7 +532,8 @@ export const useMail = create<State>()(
             selecting: false,
             pendingDone: null,
           }),
-        setCategory: (category) => set({ category, cursor: 0, checked: [], selecting: false, pendingDone: null }),
+        setCategory: (category) =>
+          set({ category, cursor: 0, checked: [], selecting: false, pendingDone: null }),
         setQuery: (query) => set({ query, cursor: 0, selecting: false, pendingDone: null }),
         openThread: (id) => {
           set({
@@ -406,7 +541,9 @@ export const useMail = create<State>()(
             focusMessageId: null,
             viewing: "thread",
             drawer: false,
-            threads: get().threads.map((thread) => (thread.id === id ? { ...thread, unread: false } : thread)),
+            threads: get().threads.map((thread) =>
+              thread.id === id ? { ...thread, unread: false } : thread,
+            ),
           });
           void enqueue(async () => {
             const data = await getActiveBackend().act(dataOf(get()), "read", [id]);
@@ -431,14 +568,20 @@ export const useMail = create<State>()(
         },
         checkVisible: (ids) => {
           const all = ids.length > 0 && ids.every((id) => get().checked.includes(id));
-          set({ checked: all ? get().checked.filter((id) => !ids.includes(id)) : [...new Set([...get().checked, ...ids])] });
+          set({
+            checked: all
+              ? get().checked.filter((id) => !ids.includes(id))
+              : [...new Set([...get().checked, ...ids])],
+          });
         },
         selectUnread: (ids) => set({ checked: ids, selecting: ids.length > 0 }),
-        selectAll: (ids) => set({ checked: [...new Set(ids)], selecting: ids.length > 0, anchor: null }),
+        selectAll: (ids) =>
+          set({ checked: [...new Set(ids)], selecting: ids.length > 0, anchor: null }),
         setSelecting: (selecting) => set({ selecting }),
         setListedIds: (ids) => {
           const current = get().listedIds;
-          if (current.length === ids.length && current.every((id, index) => id === ids[index])) return;
+          if (current.length === ids.length && current.every((id, index) => id === ids[index]))
+            return;
           set({ listedIds: ids });
         },
         clearChecks: () => set({ checked: [], anchor: null }),
@@ -449,8 +592,10 @@ export const useMail = create<State>()(
         setHelp: (help) => set({ help }),
         setSettings: (settingsOpen) =>
           set(settingsOpen ? { settingsOpen: true, drawer: false } : { settingsOpen: false }),
-        setSnooze: (snoozeOpen) => set(snoozeOpen ? { snoozeOpen: true } : { snoozeOpen: false, gestureIds: null }),
-        setLabelMenu: (labelMenu) => set(labelMenu ? { labelMenu: true } : { labelMenu: false, gestureIds: null }),
+        setSnooze: (snoozeOpen) =>
+          set(snoozeOpen ? { snoozeOpen: true } : { snoozeOpen: false, gestureIds: null }),
+        setLabelMenu: (labelMenu) =>
+          set(labelMenu ? { labelMenu: true } : { labelMenu: false, gestureIds: null }),
         openSnoozeFor: (ids) => set({ snoozeOpen: true, gestureIds: ids }),
         openLabelFor: (ids) => set({ labelMenu: true, gestureIds: ids }),
 
@@ -526,14 +671,17 @@ export const useMail = create<State>()(
           const name = before.labels.find((label) => label.id === labelId)?.name ?? "Label";
           void enqueue(async () => {
             const result = await getActiveBackend().setLabels(dataOf(get()), labelId, chosen);
-            commit(result.data, { toast: { text: result.added ? `Labeled ${name}` : `Removed ${name}`, snapshot } });
+            commit(result.data, {
+              toast: { text: result.added ? `Labeled ${name}` : `Removed ${name}`, snapshot },
+            });
           });
         },
 
         createLabel: (name) => {
           const trimmed = name.trim();
           if (!trimmed) return null;
-          if (get().labels.some((label) => label.name.toLowerCase() === trimmed.toLowerCase())) return null;
+          if (get().labels.some((label) => label.name.toLowerCase() === trimmed.toLowerCase()))
+            return null;
           const label = {
             id: uid(),
             name: trimmed,
@@ -548,8 +696,13 @@ export const useMail = create<State>()(
           const snapshot = snapshotOf(dataOf(get()));
           set({
             labels: get().labels.filter((label) => label.id !== id),
-            filters: get().filters.map((filter) => (filter.labelId === id ? { ...filter, labelId: null } : filter)),
-            threads: get().threads.map((thread) => ({ ...thread, labels: thread.labels.filter((item) => item !== id) })),
+            filters: get().filters.map((filter) =>
+              filter.labelId === id ? { ...filter, labelId: null } : filter,
+            ),
+            threads: get().threads.map((thread) => ({
+              ...thread,
+              labels: thread.labels.filter((item) => item !== id),
+            })),
             folder: get().folder === `label:${id}` ? "inbox" : get().folder,
             toast: { text: "Label deleted", snapshot },
           });
@@ -557,62 +710,44 @@ export const useMail = create<State>()(
         },
 
         openCompose: (mode, threadId) => {
+          primeIosKeyboard();
           const s = get();
-          const thread = s.threads.find((item) => item.id === (threadId ?? s.openId));
-          if (mode !== "new" && thread?.draft && (mode === thread.draft.mode || mode === "reply")) {
+          const explicit = threadId != null && threadId !== "";
+          const thread = s.threads.find((item) => item.id === (threadId ?? s.openId)) ?? null;
+          const message = thread ? ([...thread.messages].reverse()[0] ?? null) : null;
+          const mine = demoMine(s, s.account);
+          const signature = s.settings.signature;
+          const fromFor = (next: DraftMode) => {
+            if (next === "new" || next === "forward" || !thread)
+              return demoFromAddress(s, s.account);
+            return plusFallback(s, thread.plusTag, s.account);
+          };
+          const build = (next: DraftMode) =>
+            freshCompose(
+              next,
+              fromFor(next),
+              signature,
+              next === "new" ? null : thread,
+              next === "new" ? null : message,
+              mine,
+            );
+          const draft = thread?.draft ?? null;
+          const restore =
+            Boolean(draft) &&
+            (mode === draft?.mode || (mode === "reply" && draft?.mode !== "new")) &&
+            (mode !== "new" || explicit);
+          if (restore && draft && thread) {
             set({
               compose: {
-                mode: thread.draft.mode,
-                threadId: thread.messages.length ? thread.id : null,
-                draftThreadId: thread.id,
-                replyToId: thread.draft.replyToId,
-                from: thread.draft.from,
-                to: thread.draft.to,
-                cc: thread.draft.cc,
-                bcc: thread.draft.bcc,
-                showCc: Boolean(thread.draft.cc),
-                showBcc: Boolean(thread.draft.bcc),
-                subject: thread.draft.subject,
-                body: thread.draft.body,
-                attachments: thread.draft.attachments,
-                minimized: false,
-                expanded: false,
+                ...withDraft(build(draft.mode), thread, draft, signature),
+                openedAt: nextComposeSession(),
               },
               palette: false,
             });
             return;
           }
-          if (mode === "new" || !thread) {
-            set({ compose: blankCompose(demoFromAddress(s, s.account), s.settings.signature), palette: false });
-            return;
-          }
-          const message = [...thread.messages].reverse()[0];
-          if (!message) {
-            set({ compose: blankCompose(demoFromAddress(s, s.account), s.settings.signature), palette: false });
-            return;
-          }
-          const fields = replyFields(message, mode, demoMine(s, s.account));
-          const from = mode === "forward" ? demoFromAddress(s, s.account) : plusFallback(s, thread.plusTag, s.account);
-          set({
-            compose: {
-              mode,
-              threadId: thread.id,
-              draftThreadId: thread.id,
-              replyToId: message.id,
-              from,
-              to: fields.to,
-              cc: fields.cc,
-              bcc: "",
-              showCc: Boolean(fields.cc),
-              showBcc: false,
-              subject: fields.subject,
-              body: fields.body,
-              attachments: mode === "forward" ? message.attachments.map((file) => ({ ...file, id: uid() })) : [],
-              minimized: false,
-              expanded: false,
-            },
-            palette: false,
-          });
+          const nextMode = mode !== "new" && message ? mode : "new";
+          set({ compose: { ...build(nextMode), openedAt: nextComposeSession() }, palette: false });
         },
 
         patchCompose: (partial) => {
@@ -628,7 +763,12 @@ export const useMail = create<State>()(
         removeComposeFile: (id) => {
           const compose = get().compose;
           if (!compose) return;
-          set({ compose: { ...compose, attachments: compose.attachments.filter((file) => file.id !== id) } });
+          set({
+            compose: {
+              ...compose,
+              attachments: compose.attachments.filter((file) => file.id !== id),
+            },
+          });
         },
 
         send: () => {
@@ -642,14 +782,16 @@ export const useMail = create<State>()(
           }
           const snapshot = snapshotOf(dataOf(s));
           const thread = s.threads.find((item) => item.id === compose.threadId);
-          const reply = thread?.messages.find((message) => message.id === compose.replyToId) ?? thread?.messages.at(-1);
+          const reply =
+            thread?.messages.find((message) => message.id === compose.replyToId) ??
+            thread?.messages.at(-1);
           const request: SendRequest = {
             from: compose.from,
             to,
             cc: parseAddressList(compose.cc),
             bcc: parseAddressList(compose.bcc),
             subject: compose.subject.trim() || "(no subject)",
-            body: withSignature(compose.body, s.settings.signature),
+            body: compose.body,
             attachments: compose.attachments,
             replyToId: compose.replyToId,
             replyToMessageId: reply?.messageId ?? null,
@@ -724,6 +866,13 @@ export const useMail = create<State>()(
             attachments: [],
             minimized: false,
             expanded: false,
+            openedAt: nextComposeSession(),
+            seedTo: "",
+            seedCc: "",
+            seedBcc: "",
+            seedSubject: "",
+            seedBody: "",
+            seedAttachmentKey: "",
           };
           return enqueue(async () => {
             const response = await fetch(`/api/outbox/${encodeURIComponent(id)}`, {
@@ -775,7 +924,7 @@ export const useMail = create<State>()(
           const s = get();
           const compose = s.compose;
           if (!compose) return;
-          if (!shouldPersistDraft(compose, s.settings.signature)) {
+          if (!composeShouldSave(compose)) {
             const id = compose.draftThreadId;
             set({ compose: null });
             if (!id) return;
@@ -796,6 +945,7 @@ export const useMail = create<State>()(
             body: compose.body,
             updatedAt: new Date().toISOString(),
             attachments: compose.attachments,
+            signed: true,
           };
           const threadId = compose.draftThreadId;
           set({ compose: null, toast: { text: "Draft saved", snapshot } });
@@ -821,8 +971,9 @@ export const useMail = create<State>()(
               body: compose.body,
               updatedAt: new Date().toISOString(),
               attachments: compose.attachments,
+              signed: true,
             };
-            if (!shouldPersistDraft(compose, current.settings.signature)) {
+            if (!composeShouldSave(compose)) {
               const id = compose.draftThreadId;
               if (!id) return;
               await persistClearedDraft(id);
@@ -844,12 +995,27 @@ export const useMail = create<State>()(
           });
         },
 
+        discardCompose: () => {
+          const compose = get().compose;
+          if (!compose) return;
+          const id = compose.draftThreadId;
+          set({ compose: null });
+          if (!id) return;
+          void enqueue(async () => {
+            await persistClearedDraft(id);
+          });
+        },
+
         addFilter: (filter) => {
           set({ filters: [...get().filters, { ...filter, id: uid() }] });
           void persistProduct();
         },
         toggleFilter: (id) => {
-          set({ filters: get().filters.map((filter) => (filter.id === id ? { ...filter, enabled: !filter.enabled } : filter)) });
+          set({
+            filters: get().filters.map((filter) =>
+              filter.id === id ? { ...filter, enabled: !filter.enabled } : filter,
+            ),
+          });
           void persistProduct();
         },
         deleteFilter: (id) => {
@@ -876,14 +1042,19 @@ export const useMail = create<State>()(
         rememberSearch: (query) => {
           const text = query.trim();
           if (!text) return;
-          const recentSearches = recentSearchesOf([text, ...recentSearchesOf(get().settings.recentSearches)]);
+          const recentSearches = recentSearchesOf([
+            text,
+            ...recentSearchesOf(get().settings.recentSearches),
+          ]);
           set({ settings: { ...get().settings, recentSearches } });
           void persistProduct();
         },
 
         forgetSearch: (query) => {
           const text = query.trim().toLowerCase();
-          const recentSearches = recentSearchesOf(get().settings.recentSearches).filter((item) => item.toLowerCase() !== text);
+          const recentSearches = recentSearchesOf(get().settings.recentSearches).filter(
+            (item) => item.toLowerCase() !== text,
+          );
           set({ settings: { ...get().settings, recentSearches } });
           void persistProduct();
         },
@@ -898,20 +1069,34 @@ export const useMail = create<State>()(
           set({
             settings: { ...before.settings, senderRules },
             threads: applyInboxCategories(before.threads, senderRules),
-            toast: pushUndo(before.toast, "Sender filed", snapshot, before.settings.undoSeconds * 1000),
+            toast: pushUndo(
+              before.toast,
+              "Sender filed",
+              snapshot,
+              before.settings.undoSeconds * 1000,
+            ),
           });
           void persistProduct();
         },
 
         decideSenders: (emails, status) => {
-          const chosen = emails.map((email) => email.trim().toLowerCase()).filter((email) => email.includes("@"));
+          const chosen = emails
+            .map((email) => email.trim().toLowerCase())
+            .filter((email) => email.includes("@"));
           if (!chosen.length) return;
           actionGen += 1;
           const before = get();
           const snapshot = snapshotOf(dataOf(before));
           const book = decideSenderBook(gateBookOf(before.settings.gate), chosen, status);
           const gated = applyGate(before.threads, book, before.aliases);
-          const text = status === "accepted" ? (chosen.length > 1 ? "Senders accepted" : "Sender accepted") : chosen.length > 1 ? "Senders blocked" : "Sender blocked";
+          const text =
+            status === "accepted"
+              ? chosen.length > 1
+                ? "Senders accepted"
+                : "Sender accepted"
+              : chosen.length > 1
+                ? "Senders blocked"
+                : "Sender blocked";
           set({
             settings: { ...before.settings, gate: gated.book },
             threads: gated.threads,
@@ -930,7 +1115,12 @@ export const useMail = create<State>()(
           set({
             settings: { ...before.settings, gate: gated.book },
             threads: gated.threads,
-            toast: pushUndo(before.toast, "Domain blocked", snapshot, before.settings.undoSeconds * 1000),
+            toast: pushUndo(
+              before.toast,
+              "Domain blocked",
+              snapshot,
+              before.settings.undoSeconds * 1000,
+            ),
           });
           void persistProduct();
         },
@@ -953,7 +1143,13 @@ export const useMail = create<State>()(
             set({ toast: null });
             return;
           }
-          set({ ...popped.restore, toast: popped.toast, checked: [], selecting: false, pendingDone: null });
+          set({
+            ...popped.restore,
+            toast: popped.toast,
+            checked: [],
+            selecting: false,
+            pendingDone: null,
+          });
           void persistProduct();
         },
         dismissToast: () => set({ toast: null }),
@@ -967,7 +1163,11 @@ export const useMail = create<State>()(
           const snapshot = snapshotOf(dataOf(s));
           void enqueue(async () => {
             const result = await getActiveBackend().sync(dataOf(get()));
-            commit(result.data, { toast: { text: result.notice, snapshot } }, { settingsFrom: "server" });
+            commit(
+              result.data,
+              { toast: { text: result.notice, snapshot } },
+              { settingsFrom: "server" },
+            );
           });
         },
 
@@ -976,7 +1176,9 @@ export const useMail = create<State>()(
           if (s.folder !== "trash" && s.folder !== "spam") return;
           const snapshot = snapshotOf(dataOf(s));
           const location = s.folder;
-          const ids = s.threads.filter((thread) => thread.location === location && accountOf(thread) === s.account).map((thread) => thread.id);
+          const ids = s.threads
+            .filter((thread) => thread.location === location && accountOf(thread) === s.account)
+            .map((thread) => thread.id);
           const next = hideThreadIds(dataOf(s), ids);
           set({
             ...sliceOf(next),
@@ -1044,7 +1246,10 @@ export const useMail = create<State>()(
         account: "grokbot" as const,
       }),
       merge: (persistedState, currentState) => {
-        const saved = persistedState && typeof persistedState === "object" ? (persistedState as Partial<State>) : {};
+        const saved =
+          persistedState && typeof persistedState === "object"
+            ? (persistedState as Partial<State>)
+            : {};
         return { ...currentState, ...saved, account: "grokbot", gmail: "off" };
       },
       migrate: (persisted: unknown, version: number) => {
@@ -1060,7 +1265,10 @@ export const useMail = create<State>()(
             ...fresh,
             settings: {
               ...settings,
-              vacationText: settings.vacationText === staleVacation ? "I'm away from this mailbox." : settings.vacationText,
+              vacationText:
+                settings.vacationText === staleVacation
+                  ? "I'm away from this mailbox."
+                  : settings.vacationText,
             },
             gmail: "off" as const,
             account: "grokbot" as const,

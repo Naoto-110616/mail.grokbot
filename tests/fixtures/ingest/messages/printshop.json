@@ -1,8 +1,8 @@
 {
   "kind": "message",
-  "id": "msg_printful",
-  "messageId": "<printful@print.example>",
-  "from": { "name": "Printful", "email": "hello@print.example" },
+  "id": "msg_printshop",
+  "messageId": "<printshop@print.example>",
+  "from": { "name": "Printshop", "email": "hello@print.example" },
   "to": [{ "name": "You", "email": "you@example.test" }],
   "subject": "This week in the shop",
   "body": "New colors are in. Unsubscribe any time.",

@@ -95,6 +95,8 @@ A hint only. The app does not store it and does not use it to decide which messa
 
 `direction` is `inbound` or `outbound`. Any other value is stored as empty. A missing direction is inbound unless `from` is the account address, which is outbound. Outbound mail is shown as sent by the mailbox owner and listed in Sent.
 
+A copy of a message the app sent is stored once. When an ingested message is the bot inbox copy of an app send, it updates the app's `msg_<providerMessageId>` row instead of adding a second one. It matches when its `id` or `messageId` is the provider message id, or, failing that, when `from`, `to`, and `subject` match and `date` is within 15 minutes of the send. An explicit `inbound` direction never matches, so mail you send to yourself still arrives. If the copy is ingested before the send is marked sent, the send links to that copy. Pairs stored before this rule are shown once on read.
+
 `html` is optional. A string is stored in `mail_message.html_body`. The plain `body` (or `text`) is always stored as well. The reader shows the HTML when `html_body` is present, and the plain body when it is not.
 
 `html` is capped at **1 MiB (1,048,576 UTF-8 bytes)** per message. The 5MB request cap is unchanged. Over the cap, the message is still accepted, the plain body is stored, and `html_body` is not written: a new row stays null, and an update keeps the HTML already stored. A blank `html` is treated the same as omitting it. A new `html` within the cap replaces `html_body`.

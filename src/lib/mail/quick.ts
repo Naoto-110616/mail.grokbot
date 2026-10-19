@@ -4,9 +4,9 @@ import {
   type Attachment,
   type Message,
   type Thread,
+  composeDocument,
   parseAddressList,
   replyFields,
-  withSignature,
 } from "./model.ts";
 
 export type QuickReply = { id: string; name: string; text: string; emoji: string };
@@ -29,14 +29,16 @@ export type QuickSend = {
 
 const AUTO = /^(?:no-?reply|noreply|notifications?|newsletter|mailer-daemon|postmaster)$/i;
 const BOT_LOCAL =
-  /(?:^|[^a-z0-9])(?:bots?|alerts?|alarms?|notifiers?|monitors?|automated|daemon)(?:[^a-z0-9]|$)|botbagger/i;
-const BOT_NAME = /\b(?:bots?|alerts?|alarms?|notifiers?|automated)\b|botbagger/i;
+  /(?:^|[^a-z0-9])(?:bots?|alerts?|alarms?|notifiers?|monitors?|automated|daemon)(?:[^a-z0-9]|$)|[a-z0-9]bots?$/i;
+const BOT_NAME = /\b(?:bots?|alerts?|alarms?|notifiers?|automated)\b/i;
+/** A compound name such as WatchBot or BotWatch. Case-sensitive so "Abbott" stays a person. */
+const BOT_COMPOUND = /[a-z]Bots?\b|\bBot[A-Z]/;
 
 /** No-reply, list mail, auto-submitted, and bot or alert senders are not people. */
 export function automatedMail(message: Message): boolean {
   const local = localPart(message.from.email);
   if (AUTO.test(local) || BOT_LOCAL.test(local)) return true;
-  if (BOT_NAME.test(message.from.name ?? "")) return true;
+  if (BOT_NAME.test(message.from.name ?? "") || BOT_COMPOUND.test(message.from.name ?? "")) return true;
   if ((message.listUnsubscribe ?? "").trim()) return true;
   const submitted = (message.autoSubmitted ?? "").trim().toLowerCase();
   return submitted !== "" && submitted !== "no";
@@ -115,7 +117,7 @@ export function buildQuickRequest(opts: {
     cc: parseAddressList(fields.cc),
     bcc: [],
     subject: fields.subject,
-    body: withSignature(`${lead}${fields.body}`, opts.signature),
+    body: composeDocument(lead, opts.signature, fields.body),
     attachments: [],
     replyToId: message.id,
     replyToMessageId: message.messageId,

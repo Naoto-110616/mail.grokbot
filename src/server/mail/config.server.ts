@@ -7,8 +7,11 @@ import {
   type BotConnectionView,
   type HeaderMode,
 } from "../../lib/mail/bot-connection.ts";
+import { demoMode } from "../../lib/env.server.ts";
 import { DEMO_ADDRESS, aliasesFor, type Alias } from "../../lib/mail/model.ts";
+import { demoMailbox } from "../../lib/mail/demo-mailbox.ts";
 import { demoPublicConfig, type PublicMailConfig } from "../../lib/mail/public-config.ts";
+import { readDemoConnection, writeDemoConnection } from "./demo-state.server.ts";
 
 export type MailSecrets = {
   webhookUrl: string;
@@ -163,7 +166,9 @@ async function openSql(): Promise<SqlRunner | null> {
 }
 
 async function readMailboxSpec(sql: SqlRunner): Promise<MailboxSpec | "missing"> {
-  const rows = await sql<{ spec: unknown }>`select spec from mail_mailbox_config where id = ${CONFIG_ID}`;
+  const rows = await sql<{
+    spec: unknown;
+  }>`select spec from mail_mailbox_config where id = ${CONFIG_ID}`;
   const row = rows[0];
   if (!row) return "missing";
   return parseMailboxSpec(row.spec);
@@ -174,7 +179,22 @@ async function readMailboxSpec(sql: SqlRunner): Promise<MailboxSpec | "missing">
  * A present row wins for the webhook URL, key, and header, even when those are blank.
  * Pass `sql` to use that connection. Pass `null` to skip the database. Omit it to open one.
  */
-export async function loadMailConfig(root = process.cwd(), sql?: SqlRunner | null): Promise<LoadedConfig> {
+export async function loadMailConfig(
+  root = process.cwd(),
+  sql?: SqlRunner | null,
+): Promise<LoadedConfig> {
+  if (sql === undefined && demoMode()) {
+    const mail = demoMailbox();
+    return {
+      ...demoPublicConfig(),
+      displayName: mail.settings.displayName,
+      address: mail.settings.defaultFrom,
+      aliases: mail.aliases,
+      configured: false,
+      secrets: null,
+      delivery: readDemoConnection(),
+    };
+  }
   const file = await readFileConfig(root);
   const resolved = sql === undefined ? await openSql() : sql;
   if (!resolved) return file;
@@ -197,7 +217,10 @@ export async function webhookTarget(root = process.cwd()): Promise<MailSecrets |
 }
 
 /** Same resolution as `webhookTarget`, using the caller's database instead of opening another. */
-export async function webhookTargetUsing(sql: SqlRunner, root = process.cwd()): Promise<MailSecrets | null> {
+export async function webhookTargetUsing(
+  sql: SqlRunner,
+  root = process.cwd(),
+): Promise<MailSecrets | null> {
   const loaded = await loadMailConfig(root, sql);
   return loaded.secrets;
 }
@@ -240,6 +263,20 @@ export async function saveBotConnection(
   input: { webhookUrl: string; webhookKey: string; headerMode: HeaderMode },
   root = process.cwd(),
 ): Promise<BotConnectionView> {
+  if (demoMode()) {
+    const webhookUrl = input.webhookUrl.trim();
+    if (!webhookUrlAllowed(webhookUrl)) throw new Error("invalid");
+    const typed = input.webhookKey.trim();
+    if (typed.length > KEY_MAX) throw new Error("invalid");
+    const current = readDemoConnection();
+    const view: BotConnectionView = {
+      webhookUrl,
+      headerMode: headerModeOf(input.headerMode),
+      keySet: webhookUrl.length > 0 && (typed.length > 0 || current.keySet),
+    };
+    writeDemoConnection(view);
+    return view;
+  }
   const sql = await openSql();
   if (!sql) throw new Error("invalid");
   return saveMailboxConnection(sql, input, root);

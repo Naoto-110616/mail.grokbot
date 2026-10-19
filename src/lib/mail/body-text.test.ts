@@ -118,12 +118,29 @@ describe("message body text", () => {
     assert.match(plain(signed.hidden ?? []), /Ada/);
 
     const dash = parseBody(["OK", "", "—", "Ada"].join("\n"));
-    assert.equal(plain(dash.blocks).trim(), "OK");
-    assert.match(plain(dash.hidden ?? []), /Ada/);
+    assert.match(plain(dash.blocks), /OK/);
+    assert.match(plain(dash.blocks), /Ada/);
+    assert.equal(dash.hidden, null);
 
     const phone = parseBody("OK\n\nSent from my phone");
-    assert.equal(plain(phone.blocks).trim(), "OK");
-    assert.match(plain(phone.hidden ?? []), /Sent from my phone/);
+    assert.match(plain(phone.blocks), /OK/);
+    assert.match(plain(phone.blocks), /Sent from my phone/);
+    assert.equal(phone.hidden, null);
+
+    const standardOnly = parseBody("-- \nPat\npat@example.test");
+    assert.match(plain(standardOnly.blocks), /pat@example.test/);
+    assert.equal(standardOnly.hidden, null);
+
+    const noSpace = parseBody("Hello\n\n--\nThis line stays visible");
+    assert.match(plain(noSpace.blocks), /This line stays visible/);
+    assert.equal(noSpace.hidden, null);
+
+    const afterQuote = parseBody(
+      ["See you then.", "", "On Mon, Oct 5, 2026, Ada wrote:", "> older line", "", "Please keep this paragraph."].join("\n"),
+    );
+    assert.match(plain(afterQuote.blocks), /Please keep this paragraph/);
+    assert.match(plain(afterQuote.blocks), /older line/);
+    assert.equal(afterQuote.hidden, null);
 
     const both = parseBody(["Hello", "", "> old", "", "-- ", "Ada"].join("\n"));
     assert.equal(plain(both.blocks).trim(), "Hello");
@@ -275,7 +292,8 @@ describe("reader rendering", () => {
     const reader = readFileSync(new URL("../../components/mail/reader.tsx", import.meta.url), "utf8");
     assert.equal(reader.includes("dangerouslySetInnerHTML"), false);
     assert.match(reader, /parseBody/);
-    assert.match(reader, /quotedControlLabel\(doc\.hidden, trimmed\)/);
+    assert.match(reader, /quotedControlLabel\(hidden, trimmed\)/);
+    assert.match(reader, /doc\.blocks\.length > 0 \? doc\.blocks : \(doc\.hidden/);
     assert.match(reader, /quotedLabel \?/);
     assert.equal(reader.includes("Show trimmed content"), false);
     assert.equal(reader.includes("…"), false);

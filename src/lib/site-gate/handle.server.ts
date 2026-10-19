@@ -1,13 +1,8 @@
-import { env } from "../env.server.ts";
+import { demoMode, env, sessionSecret, sitePassword } from "../env.server.ts";
 import { sessionVersionFromEnv } from "./env-security.ts";
-import {
-  createRateLimiter,
-  handleGate,
-  sessionAllowed,
-  type GateDeps,
-} from "./gate.ts";
+import { createRateLimiter, handleGate, sessionAllowed, type GateDeps } from "./gate.ts";
 import { requestLocalhostGateOpen } from "./localhost-gate.ts";
-import { isIngestApiPath, isOutboxApiPath } from "./paths.ts";
+import { isIngestApiPath, isOutboxApiPath, normalizePath } from "./paths.ts";
 import { loadSecurity, savePasswordHash } from "./store.server.ts";
 
 const rateLimit = createRateLimiter();
@@ -15,8 +10,8 @@ const rateLimit = createRateLimiter();
 export function liveDeps(): GateDeps {
   return {
     now: () => Date.now(),
-    appPassword: env("APP_PASSWORD"),
-    sessionSecret: env("SESSION_SECRET"),
+    appPassword: sitePassword(),
+    sessionSecret: sessionSecret(),
     getSecurity: loadSecurity,
     savePassword: savePasswordHash,
     rateLimit,
@@ -38,8 +33,14 @@ export async function handleSiteRequest(input: {
       const { handleOutboxApi } = await import("../../server/mail/outbox-api.server.ts");
       return await handleOutboxApi(input.request);
     }
+    if (input.handlerType !== "serverFn" && normalizePath(input.pathname) === "/api/demo") {
+      const preview = await handleDemoPreview(input.request);
+      if (preview) return preview;
+    }
     // Dev loopback only. NODE_ENV=production never takes this branch.
     if (requestLocalhostGateOpen(input.request)) return null;
+    // Sample mail is open until a site password is set. Ingest and outbox stay above this.
+    if (demoMode() && !sitePassword()) return null;
     return await handleGate(
       input.request,
       {
@@ -67,6 +68,7 @@ export async function assertSiteSession(): Promise<void> {
     throw unauthorized();
   }
   if (requestLocalhostGateOpen(request)) return;
+  if (demoMode() && !sitePassword()) return;
   let allowed = false;
   try {
     allowed = await sessionAllowed(request, liveDeps());
@@ -74,6 +76,31 @@ export async function assertSiteSession(): Promise<void> {
     allowed = false;
   }
   if (!allowed) throw unauthorized();
+}
+
+async function handleDemoPreview(request: Request): Promise<Response | null> {
+  if (!demoMode()) return jsonBody(404, { error: "not found" });
+  if (sitePassword()) {
+    let allowed = false;
+    try {
+      allowed = await sessionAllowed(request, liveDeps());
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) return null;
+  }
+  const { demoPreview } = await import("../../lib/mail/demo-mailbox.ts");
+  return jsonBody(200, demoPreview());
+}
+
+function jsonBody(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 function unauthorized(): Response {

@@ -21,13 +21,15 @@ import {
   defaultAliases,
   defaultSettings,
   hydrateDisplaySettings,
+  isDefaultSignature,
   signatureFor,
   uid,
-  withSignature,
 } from "@/lib/mail/model";
 import { applyInboxCategories } from "@/lib/mail/category";
+import { demoMode, ownerFromEnv } from "@/lib/env.server";
 import { reopenDoneThread } from "@/lib/mail/done";
 import { canonicalOutboxStatus, outboxItemsForThreads, type OutboxItem } from "@/lib/mail/outbox";
+import { readDemoMailbox, writeDemoMailbox } from "./demo-state.server.ts";
 import { deleteOutboundForMailbox } from "./outbound-delete.ts";
 import { linkedThreadState, threadIsHidden } from "@/lib/mail/thread-place";
 import { sendWake, syncWebhook } from "@/lib/mail/webhook-body";
@@ -119,8 +121,22 @@ function resolveIdentity(
   account: IngestIdentity | null,
   config: LoadedConfig,
 ): { address: string; displayName: string; aliases: Alias[] } | null {
+  // GBM_INBOX_ADDRESS names the owner. GBM_TAGS, when set, lists the plus tags.
+  const owner = ownerFromEnv();
+  if (owner) {
+    const sameInbox = account?.address?.trim().toLowerCase() === owner.address.toLowerCase();
+    const aliases = owner.tags
+      ? aliasesFor(owner.address, owner.displayName, owner.tags)
+      : sameInbox && account && account.aliases.length > 0
+        ? account.aliases
+        : aliasesFor(owner.address, owner.displayName, []);
+    return { address: owner.address, displayName: owner.displayName, aliases };
+  }
   if (account?.address) {
-    const aliases = account.aliases.length > 0 ? account.aliases : aliasesFor(account.address, account.displayName || "You");
+    const aliases =
+      account.aliases.length > 0
+        ? account.aliases
+        : aliasesFor(account.address, account.displayName || "You");
     return { address: account.address, displayName: account.displayName || "You", aliases };
   }
   if (config.configured) {
@@ -130,6 +146,7 @@ function resolveIdentity(
 }
 
 async function sqlOrNull(): Promise<Sql | null> {
+  if (demoMode()) return null;
   try {
     const { getSql } = await import("@/lib/db");
     return await getSql();
@@ -159,7 +176,9 @@ async function readOverlay(): Promise<Overlay | null> {
       const labels = readJson<unknown>(row.labels_json);
       threads.set(row.thread_id, {
         location: asLocation(row.location),
-        labels: Array.isArray(labels) ? labels.filter((item): item is string => typeof item === "string") : [],
+        labels: Array.isArray(labels)
+          ? labels.filter((item): item is string => typeof item === "string")
+          : [],
         starred: asBool(row.starred),
         important: asBool(row.important),
         unread: asBool(row.unread),
@@ -173,8 +192,16 @@ async function readOverlay(): Promise<Overlay | null> {
     const hiddenRows = await sql<{ thread_id: string }>`select thread_id from mail_hidden`;
     const hidden = new Set(hiddenRows.map((row) => row.thread_id));
 
-    const labelRows = await sql<{ id: string; name: string; swatch: string }>`select id, name, swatch from mail_label`;
-    const labelsOut: Label[] = labelRows.map((row) => ({ id: row.id, name: row.name, swatch: asSwatch(row.swatch) }));
+    const labelRows = await sql<{
+      id: string;
+      name: string;
+      swatch: string;
+    }>`select id, name, swatch from mail_label`;
+    const labelsOut: Label[] = labelRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      swatch: asSwatch(row.swatch),
+    }));
 
     const filterRows = await sql<{ id: string; spec: string }>`select id, spec from mail_filter`;
     const filters: Filter[] = [];
@@ -183,7 +210,10 @@ async function readOverlay(): Promise<Overlay | null> {
       if (spec && typeof spec === "object") filters.push({ ...spec, id: row.id });
     }
 
-    const draftRows = await sql<{ thread_id: string; spec: string }>`select thread_id, spec from mail_draft`;
+    const draftRows = await sql<{
+      thread_id: string;
+      spec: string;
+    }>`select thread_id, spec from mail_draft`;
     const drafts = new Map<string, Draft>();
     for (const row of draftRows) {
       const spec = readJson<Draft>(row.spec);
@@ -218,8 +248,12 @@ async function readOverlay(): Promise<Overlay | null> {
       outbox.push({
         id: row.client_send_id,
         fromAddress: message.from?.email ?? "",
-        to: (message.to ?? []).map((address) => address.email).filter((email) => email.includes("@")),
-        cc: (message.cc ?? []).map((address) => address.email).filter((email) => email.includes("@")),
+        to: (message.to ?? [])
+          .map((address) => address.email)
+          .filter((email) => email.includes("@")),
+        cc: (message.cc ?? [])
+          .map((address) => address.email)
+          .filter((email) => email.includes("@")),
         subject: message.subject ?? "",
         text: message.body ?? "",
         status,
@@ -231,7 +265,9 @@ async function readOverlay(): Promise<Overlay | null> {
       });
     }
 
-    const settingsRows = await sql<{ spec: unknown }>`select spec from mail_settings where id = 'settings'`;
+    const settingsRows = await sql<{
+      spec: unknown;
+    }>`select spec from mail_settings where id = 'settings'`;
     const settingsRow = settingsRows[0];
 
     return {
@@ -266,8 +302,16 @@ function applyState(thread: Thread, state: ThreadState | undefined): Thread {
   };
 }
 
-function mergeOutbound(threads: Thread[], outbound: OutboundRow[], results: SendResult[], hidden: Set<string>): Thread[] {
-  const next = threads.map((thread) => ({ ...thread, messages: thread.messages.map((message) => ({ ...message })) }));
+function mergeOutbound(
+  threads: Thread[],
+  outbound: OutboundRow[],
+  results: SendResult[],
+  hidden: Set<string>,
+): Thread[] {
+  const next = threads.map((thread) => ({
+    ...thread,
+    messages: thread.messages.map((message) => ({ ...message })),
+  }));
   for (const row of outbound) {
     if (canonicalOutboxStatus(row.status) === "sent") {
       const sentId = row.providerMessageId ? `msg_${row.providerMessageId}` : null;
@@ -283,16 +327,23 @@ function mergeOutbound(threads: Thread[], outbound: OutboundRow[], results: Send
     }
     let message = applySendResults([row.message], results)[0] ?? row.message;
     if (!results.some((result) => result.clientSendId === row.clientSendId)) {
-      message = { ...message, delivery: deliveryForStatus(row.status), clientSendId: row.clientSendId };
+      message = {
+        ...message,
+        delivery: deliveryForStatus(row.status),
+        clientSendId: row.clientSendId,
+      };
     }
     const carrier = next.find((thread) =>
       thread.messages.some(
-        (item) => item.clientSendId === row.clientSendId || (message.messageId && item.messageId === message.messageId),
+        (item) =>
+          item.clientSendId === row.clientSendId ||
+          (message.messageId && item.messageId === message.messageId),
       ),
     );
     if (carrier) {
       carrier.messages = carrier.messages.map((item) =>
-        item.clientSendId === row.clientSendId || (message.messageId && item.messageId === message.messageId)
+        item.clientSendId === row.clientSendId ||
+        (message.messageId && item.messageId === message.messageId)
           ? { ...item, ...message, clientSendId: row.clientSendId }
           : item,
       );
@@ -301,7 +352,9 @@ function mergeOutbound(threads: Thread[], outbound: OutboundRow[], results: Send
     if (row.threadId && hidden.has(row.threadId)) continue;
     const host = row.threadId ? next.find((thread) => thread.id === row.threadId) : undefined;
     if (host) {
-      host.messages = [...host.messages, message].sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+      host.messages = [...host.messages, message].sort(
+        (a, b) => Date.parse(a.date) - Date.parse(b.date),
+      );
       continue;
     }
     const id = row.threadId || `thr_${row.clientSendId}`;
@@ -366,7 +419,11 @@ async function writeSettings(settings: Settings): Promise<void> {
   }
 }
 
-export async function loadBridgeMailbox(current: MailData | null, root = process.cwd()): Promise<MailData> {
+export async function loadBridgeMailbox(
+  current: MailData | null,
+  root = process.cwd(),
+): Promise<MailData> {
+  if (demoMode()) return readDemoMailbox();
   try {
     const sql = await sqlOrNull();
     if (sql) await runDueWakes(sql, root);
@@ -379,7 +436,12 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
     ingest = await loadStoredIngest();
   } catch (err) {
     console.error("[mail] load failed", err instanceof Error ? err.name : "error");
-    ingest = { identity: null, threads: [] as Thread[], messages: [], sendResults: [] as SendResult[] };
+    ingest = {
+      identity: null,
+      threads: [] as Thread[],
+      messages: [],
+      sendResults: [] as SendResult[],
+    };
   }
   const identity = resolveIdentity(ingest.identity, config);
   const overlay = await readOverlay();
@@ -397,10 +459,14 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
   }));
 
   const drafts = overlay?.drafts ?? new Map<string, Draft>();
-  threads = threads.map((thread) => (drafts.has(thread.id) ? { ...thread, draft: drafts.get(thread.id) ?? thread.draft } : thread));
+  threads = threads.map((thread) =>
+    drafts.has(thread.id) ? { ...thread, draft: drafts.get(thread.id) ?? thread.draft } : thread,
+  );
   for (const [id, draft] of drafts) {
     if (hidden.has(id) || threads.some((thread) => thread.id === id)) continue;
-    const tag = (identity?.aliases ?? current?.aliases ?? []).find((alias) => alias.email === draft.from)?.tag ?? null;
+    const tag =
+      (identity?.aliases ?? current?.aliases ?? []).find((alias) => alias.email === draft.from)
+        ?.tag ?? null;
     threads.unshift({
       id,
       subject: draft.subject.trim() || "(no subject)",
@@ -419,23 +485,34 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
     });
   }
 
-  threads = foldLoadedThreads(threads, overlay?.threads ?? new Map(), hidden, overlay?.filters ?? [], placeKeys);
+  threads = foldLoadedThreads(
+    threads,
+    overlay?.threads ?? new Map(),
+    hidden,
+    overlay?.filters ?? [],
+    placeKeys,
+  );
 
   const localSettings = current?.settings ?? defaultSettings();
-  const prefs = overlay?.settingsPresent ? hydrateDisplaySettings(overlay.settingsSpec, localSettings) : localSettings;
+  const prefs = overlay?.settingsPresent
+    ? hydrateDisplaySettings(overlay.settingsSpec, localSettings)
+    : localSettings;
   const aliases = identity?.aliases?.length
     ? identity.aliases
     : current?.aliases?.length
       ? current.aliases
       : defaultAliases();
   const signatureIsCustom =
-    prefs.signature.trim() !== "" && prefs.signature !== signatureFor(prefs.displayName, prefs.defaultFrom);
+    prefs.signature.trim() !== "" &&
+    !isDefaultSignature(prefs.signature, prefs.displayName, prefs.defaultFrom);
   const settings = identity
     ? {
         ...prefs,
         displayName: identity.displayName,
         defaultFrom: identity.address,
-        signature: signatureIsCustom ? prefs.signature : signatureFor(identity.displayName, identity.address),
+        signature: signatureIsCustom
+          ? prefs.signature
+          : signatureFor(identity.displayName, identity.address),
       }
     : prefs;
   if (overlay && !overlay.settingsPresent) await writeSettings(settings);
@@ -454,6 +531,10 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
 }
 
 async function persistMailbox(data: MailData): Promise<void> {
+  if (demoMode()) {
+    writeDemoMailbox(data);
+    return;
+  }
   const sql = await sqlOrNull();
   if (!sql) return;
   try {
@@ -515,7 +596,12 @@ async function persistMailbox(data: MailData): Promise<void> {
     for (const thread of threads) {
       for (const message of thread.messages) {
         if (!message.clientSendId) continue;
-        const status = message.delivery === "failed" ? "failed" : message.delivery === "sent" ? "sent" : "queued";
+        const status =
+          message.delivery === "failed"
+            ? "failed"
+            : message.delivery === "sent"
+              ? "sent"
+              : "queued";
         await sql`insert into mail_outbound (client_send_id, thread_id, spec, status, created_at, updated_at) values (
           ${message.clientSendId},
           ${thread.id},
@@ -557,7 +643,11 @@ export async function snoozeMailbox(data: MailData, at: number, ids: string[]): 
   return next;
 }
 
-export async function setLabelMailbox(data: MailData, labelId: string, ids: string[]): Promise<{ data: MailData; added: boolean }> {
+export async function setLabelMailbox(
+  data: MailData,
+  labelId: string,
+  ids: string[],
+): Promise<{ data: MailData; added: boolean }> {
   const current = assertMail(data);
   if (!labelId || ids.length === 0) {
     await persistMailbox(current);
@@ -568,7 +658,11 @@ export async function setLabelMailbox(data: MailData, labelId: string, ids: stri
   return next;
 }
 
-export async function saveDraftMailbox(data: MailData, draft: Draft, threadId: string | null): Promise<MailData> {
+export async function saveDraftMailbox(
+  data: MailData,
+  draft: Draft,
+  threadId: string | null,
+): Promise<MailData> {
   const next = await localDemo.saveDraft(assertMail(data), draft, threadId);
   await persistMailbox(next);
   return next;
@@ -590,7 +684,17 @@ function latestIngestCursor(data: MailData): string | null {
   return best;
 }
 
-export async function syncMailbox(data: MailData, root = process.cwd()): Promise<{ data: MailData; notice: string; delivery: "sent" | "failed" }> {
+export async function syncMailbox(
+  data: MailData,
+  root = process.cwd(),
+): Promise<{ data: MailData; notice: string; delivery: "sent" | "failed" }> {
+  if (demoMode()) {
+    return {
+      data: readDemoMailbox(),
+      notice: "Sample mailbox. No bot is connected.",
+      delivery: "sent",
+    };
+  }
   const current = assertMail(data);
   const woke = await deliverConfigured(syncWebhook(latestIngestCursor(current)), root);
   const loaded = await loadBridgeMailbox(current, root);
@@ -609,7 +713,9 @@ function waitingMessage(data: MailData, request: SendRequest, clientSendId: stri
   const id = uid();
   const fromEmail = request.from || data.settings.defaultFrom || DEMO_ADDRESS;
   const reply = request.threadId
-    ? data.threads.find((thread) => thread.id === request.threadId)?.messages.find((message) => message.id === request.replyToId)
+    ? data.threads
+        .find((thread) => thread.id === request.threadId)
+        ?.messages.find((message) => message.id === request.replyToId)
     : undefined;
   const prior = reply?.references ?? [];
   const inReplyTo = request.replyToMessageId ?? reply?.messageId ?? null;
@@ -633,7 +739,11 @@ function waitingMessage(data: MailData, request: SendRequest, clientSendId: stri
   };
 }
 
-async function stampOutbound(clientSendId: string, replyToMessageId: string | null, threadKey: string | null): Promise<void> {
+async function stampOutbound(
+  clientSendId: string,
+  replyToMessageId: string | null,
+  threadKey: string | null,
+): Promise<void> {
   const sql = await sqlOrNull();
   if (!sql) return;
   try {
@@ -660,17 +770,26 @@ function withOutboxItem(data: MailData, request: SendRequest, clientSendId: stri
     error: null,
     createdAt: new Date().toISOString(),
   };
-  return { ...data, outbox: [item, ...(data.outbox ?? []).filter((row) => row.id !== clientSendId)] };
+  return {
+    ...data,
+    outbox: [item, ...(data.outbox ?? []).filter((row) => row.id !== clientSendId)],
+  };
 }
 
 export async function sendMailbox(data: MailData, request: SendRequest, root = process.cwd()) {
   const current = assertMail(data);
-  const signed = { ...request, body: withSignature(request.body, current.settings.signature) };
   const clientSendId = `send_${uid()}`;
-  const message = waitingMessage(current, signed, clientSendId);
-  const next = withOutboxItem(insertOutgoing(current, signed, message), signed, clientSendId);
+  const message = waitingMessage(current, request, clientSendId);
+  const next = withOutboxItem(insertOutgoing(current, request, message), request, clientSendId);
   await persistMailbox(next);
-  await stampOutbound(clientSendId, signed.replyToId, signed.threadId);
+  if (demoMode()) {
+    return {
+      data: readDemoMailbox(),
+      notice: "Sample only. Nothing was sent.",
+      delivery: "waiting" as const,
+    };
+  }
+  await stampOutbound(clientSendId, request.replyToId, request.threadId);
   const sql = await sqlOrNull();
   if (sql) {
     try {
@@ -690,7 +809,12 @@ export async function sendMailbox(data: MailData, request: SendRequest, root = p
   return { data: next, notice: QUEUED_TOAST, delivery: "waiting" as const };
 }
 
-export async function retryMailboxSend(data: MailData, clientSendId: string, root = process.cwd()): Promise<MailData> {
+export async function retryMailboxSend(
+  data: MailData,
+  clientSendId: string,
+  root = process.cwd(),
+): Promise<MailData> {
+  if (demoMode()) return readDemoMailbox();
   const current = assertMail(data);
   const sql = await sqlOrNull();
   if (sql && clientSendId) {

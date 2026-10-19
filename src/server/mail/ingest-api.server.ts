@@ -16,6 +16,16 @@ import {
   type IngestLoad,
   type SendResult,
 } from "./ingest.server.ts";
+import {
+  appSentKeys,
+  bestSentCopy,
+  copyKeys,
+  dedupeSentCopies,
+  fuzzySentDistance,
+  isAppSentCopy,
+  sentCopyMatch,
+  type SentCopyCandidate,
+} from "../../lib/mail/sent-copies.ts";
 
 export const INGEST_MAX_ITEMS = 200;
 export const INGEST_MAX_BYTES = 5 * 1024 * 1024;
@@ -38,7 +48,7 @@ function json(status: number, body: unknown, extra?: HeadersInit): Response {
 }
 
 function ingestToken(deps: IngestApiDeps): string | undefined {
-  const raw = deps.env ? deps.env.INGEST_TOKEN : process.env.INGEST_TOKEN;
+  const raw = deps.env ? deps.env.INGEST_TOKEN : (process.env.GBM_INGEST_TOKEN?.trim() || process.env.INGEST_TOKEN);
   if (typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
   return trimmed ? trimmed : undefined;
@@ -149,12 +159,106 @@ async function writeAttachments(
   }
 }
 
+type TwinRow = SentCopyCandidate & {
+  clientSendId: string | null;
+  attachments: Attachment[];
+  inReplyTo: string | null;
+  references: string[];
+};
+
+type SentTwin = { kind: "copy-of-app"; row: TwinRow } | { kind: "app-of-copy"; row: TwinRow };
+
+function placeholders(values: readonly unknown[], start: number): string {
+  return values.map((_, index) => `$${index + start}`).join(", ");
+}
+
+/**
+ * The other copy of a sent email, when there is one: the app's own row for a
+ * copy from the bot inbox, or the inbox copy for the app's row. Matched by
+ * provider message id or Message-ID, then by from, to, subject, and a close time.
+ */
+async function findSentTwin(sql: Sql, message: Message): Promise<SentTwin | null> {
+  const app = isAppSentCopy(message);
+  if (!app && message.direction === "inbound") return null;
+  const keys = app ? appSentKeys(message) : copyKeys(message);
+  const idKeys = app ? keys : keys.map((item) => `msg_${item}`);
+  const params: unknown[] = [message.id, message.subject.replace(/\s+/g, " ").trim().toLowerCase()];
+  const idList = idKeys.length > 0 ? `lower(id) in (${placeholders(idKeys, params.length + 1)})` : "false";
+  params.push(...idKeys);
+  const midList = keys.length > 0 ? `lower(trim(both '<>' from coalesce(message_id, ''))) in (${placeholders(keys, params.length + 1)})` : "false";
+  params.push(...keys);
+  const side = app ? "client_send_id is null" : "client_send_id is not null";
+  const rows = await sql.query<{
+    id: string;
+    message_id: string | null;
+    client_send_id: string | null;
+    from_json: string;
+    to_json: string;
+    subject: string;
+    date: unknown;
+    direction: string | null;
+    in_reply_to: string | null;
+    references_json: string;
+    attachments_json: string;
+  }>(
+    `select id, message_id, client_send_id, from_json, to_json, subject, date, direction, in_reply_to, references_json,
+            attachments_json
+     from mail_message
+     where id <> $1 and ${side}
+       and (${idList} or ${midList} or lower(regexp_replace(trim(subject), '\\s+', ' ', 'g')) = $2)
+     limit 50`,
+    params,
+  );
+  const candidates: TwinRow[] = rows.map((row) => ({
+    id: String(row.id),
+    messageId: row.message_id,
+    clientSendId: row.client_send_id,
+    from: addressOf(readJson<unknown>(row.from_json)) ?? { name: "", email: "" },
+    to: addressList(readJson<unknown>(row.to_json)),
+    subject: row.subject ?? "",
+    date: typeof row.date === "string" ? row.date : row.date instanceof Date ? row.date.toISOString() : "",
+    direction: row.direction === "outbound" || row.direction === "inbound" ? row.direction : null,
+    inReplyTo: row.in_reply_to,
+    references: readJson<string[]>(row.references_json)?.filter((item) => typeof item === "string") ?? [],
+    attachments: (readJson<Attachment[]>(row.attachments_json) ?? []).filter((file) => file && typeof file.filename === "string"),
+  }));
+  if (app) {
+    const copy = bestSentCopy(message, candidates);
+    return copy ? { kind: "app-of-copy", row: copy } : null;
+  }
+  let best: { row: TwinRow; rank: number } | null = null;
+  for (const row of candidates) {
+    const match = sentCopyMatch(row, message);
+    if (match === "id") return { kind: "copy-of-app", row };
+    if (match !== "fuzzy") continue;
+    const rank = fuzzySentDistance(row, message) ?? Number.POSITIVE_INFINITY;
+    if (!best || rank < best.rank) best = { row, rank };
+  }
+  return best ? { kind: "copy-of-app", row: best.row } : null;
+}
+
+/** Mark the stored inbox copy as this app send. Its headers and body stay as the inbox has them. */
+async function linkSendToCopy(sql: Sql, copyId: string, app: Message): Promise<void> {
+  await sql.query(
+    `update mail_message set
+       client_send_id = $2,
+       direction = 'outbound',
+       unread = false,
+       thread_hint = coalesce(thread_hint, $3),
+       in_reply_to = coalesce(in_reply_to, $4),
+       references_json = case when references_json is null or references_json = '[]' then $5 else references_json end
+     where id = $1`,
+    [copyId, textOrNull(app.clientSendId), textOrNull(app.threadHint), textOrNull(app.inReplyTo), JSON.stringify(app.references)],
+  );
+}
+
 export async function upsertMessage(
   sql: Sql,
-  message: Message,
+  incoming: Message,
   unread: boolean,
   attachmentContent: ReadonlyMap<string, string> = new Map(),
 ): Promise<void> {
+  let message = incoming;
   const messageId = textOrNull(message.messageId);
   const id = message.id;
   const matches = await sql.query<{ id: string }>(
@@ -162,7 +266,27 @@ export async function upsertMessage(
     [id, messageId],
   );
   const ids = matches.map((row) => String(row.id));
-  const keep = ids.includes(id) ? id : (ids[0] ?? null);
+  let keep = ids.includes(id) ? id : (ids[0] ?? null);
+  if (!keep) {
+    const twin = await findSentTwin(sql, message);
+    if (twin?.kind === "copy-of-app") {
+      // The bot inbox copy of a send the app already stored: update that row in place.
+      keep = twin.row.id;
+      ids.push(twin.row.id);
+      message = {
+        ...message,
+        clientSendId: message.clientSendId ?? twin.row.clientSendId,
+        inReplyTo: message.inReplyTo ?? twin.row.inReplyTo,
+        references: message.references.length > 0 ? message.references : twin.row.references,
+        attachments: message.attachments.length > 0 ? message.attachments : twin.row.attachments,
+        direction: message.direction ?? "outbound",
+      };
+    } else if (twin?.kind === "app-of-copy") {
+      // The inbox copy came first. Link the app's send to it instead of storing a second copy.
+      await linkSendToCopy(sql, twin.row.id, message);
+      return;
+    }
+  }
   let stored = message;
   if (keep && (!stored.listUnsubscribe || !stored.autoSubmitted)) {
     const prior = await sql.query<{ from_json: string }>(`select from_json from mail_message where id = $1`, [keep]);
@@ -220,7 +344,7 @@ export async function upsertMessage(
          body = $12,
          date = $13,
          attachments_json = $14,
-         client_send_id = $15,
+         client_send_id = coalesce($15, client_send_id),
          thread_hint = coalesce($16, thread_hint),
          direction = coalesce($17, direction),
          html_body = coalesce($18, html_body)
@@ -466,7 +590,9 @@ export async function loadStoredIngest(sql?: Sql): Promise<IngestLoad> {
     sentMessageId: row.sent_message_id,
     error: row.error,
   }));
-  const withResults = applySendResults(messages, sendResults);
+  // Rows stored before ingest linked sent copies can still hold both copies of one send.
+  const folded = dedupeSentCopies(messages).messages;
+  const withResults = applySendResults(folded, sendResults);
   return {
     identity,
     messages: withResults,

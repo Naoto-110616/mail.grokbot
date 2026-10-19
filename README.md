@@ -1,50 +1,36 @@
 # Grokbot Mail
 
-Grokbot Mail is a private mailbox for one Grok Bot. The bot delivers mail with `POST /api/ingest`. This app does not speak IMAP or SMTP. Sending wakes the bot with `{ "action": "send", "clientSendId" }`. The message goes out only after the person approves it in Grok Bot.
+Grokbot Mail is a mailbox screen for one person and one bot. The bot delivers mail with `POST /api/ingest`. This app does not speak IMAP or SMTP. A send is stored, then the app wakes the bot. The message goes out only after the person approves it there.
 
-Each install is its own copy. Nothing is shared between copies.
+With no `DATABASE_URL`, or with `GBM_DEMO=1`, the app shows invented mail at `you@example.com`. Nothing in that mailbox was sent or received. Set `GBM_DEMO=0` to use a database instead (embedded PGLite when `DATABASE_URL` is unset). A site password still locks the sample inbox.
 
-## Screenshots
+## Deploy on Vercel with Neon
 
-Add pictures of your own mailbox here after you deploy. This template does not ship screenshots.
+1. Import this repo into a Vercel project you own.
+2. Create a Neon Postgres database. Put its pooled connection string in `DATABASE_URL`. Put the direct string in `DATABASE_URL_UNPOOLED` so migrations can run. The provider includes the credentials in that string. Do not commit it.
+3. Set the variables below in the Vercel project. Names and placeholders are in `.env.example`.
+4. The build command is `npm run build`. Migrations run during the build when `DATABASE_URL` is set.
 
-## Install
+Leave `GBM_DEMO` unset on a real mailbox. `GBM_DEMO=1` replaces it with the sample inbox and does not write to Postgres.
 
-Use a new Vercel project that you own. The repository does not name a Vercel project, team, or deployment URL.
+## Environment
 
-1. Import this Git repository into a new Vercel project. Leave the team and project on your own account. The public URL will be `https://<your-project>.vercel.app`, or a domain you attach.
-2. Set the environment variables below in the Vercel project. Do not commit them.
-3. Deploy. The build command is `npm run build`. `vercel.json` already sets the install command. The build applies database migrations when `DATABASE_URL` is set.
+Older names still work. When both are set, the `GBM_` name wins.
 
-### Environment
+| Variable                                          | Role                                                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `GBM_SITE_PASSWORD` or `APP_PASSWORD`             | Site password. Unset, in demo mode, leaves the sample inbox open.                                                        |
+| `GBM_SESSION_SECRET` or `SESSION_SECRET`          | Signs the session cookie. Required once a password is set.                                                               |
+| `GBM_INGEST_TOKEN` or `INGEST_TOKEN`              | Bearer token for ingest and the bot outbox routes. Unset returns 503 and stores nothing.                                 |
+| `DATABASE_URL`                                    | Postgres connection string. Unset, and `GBM_DEMO` unset, selects sample mail.                                            |
+| `DATABASE_URL_UNPOOLED`                           | Optional direct Postgres URL. Migrations prefer it.                                                                      |
+| `SESSION_VERSION`                                 | Optional non-negative integer. Missing or invalid values use `1`. Raise it to revoke cookies.                            |
+| `GBM_OWNER_NAME`, `GBM_INBOX_ADDRESS`, `GBM_TAGS` | Optional identity. Unset keeps the account the bot ingests, then the neutral default. `GBM_TAGS` is `ops,books:Reading`. |
+| `GBM_DEMO`                                        | `1` forces sample mail even when `DATABASE_URL` is set. `0` uses the database.                                           |
 
-| Variable | Role |
-| --- | --- |
-| `APP_PASSWORD` | Site password. With no database hash stored yet, this is the password. |
-| `SESSION_SECRET` | Signs the session cookie. Sign-in stays closed until this is set. |
-| `INGEST_TOKEN` | Bearer token for `POST /api/ingest` and `GET /api/ingest/state`. If it is unset, those routes return 503 and store nothing. |
-| `DATABASE_URL` | Postgres connection string. Recommended on Vercel so mail survives a new instance. When it is unset, migrations skip and the app uses an in-memory database. |
-| `DATABASE_URL_UNPOOLED` | Optional direct Postgres URL. Migrations prefer it over `DATABASE_URL`. |
-| `SESSION_VERSION` | Optional non-negative integer. Missing or invalid values use `1`. Raise it to revoke existing cookies. |
+The default signature is the display name and address from that identity. Webhook URL and key are saved in Settings, not in env. The key is write-only.
 
-Give the bot the deployment URL and the same `INGEST_TOKEN`. The bot recipe is `docs/skill/SKILL.md`.
-
-Check mail still wakes the bot with `{ "action": "sync", "after" }`. Send wakes it with `{ "action": "send", "clientSendId" }` and no message body. Save the webhook in Settings under "Grok Bot connection". That writes `webhookUrl`, `webhookKey`, and the auth header mode on the mailbox config row. The default header is `Authorization: Bearer <key>`. The key is write-only.
-
-`data/config.json` (gitignored) is only a fallback when that row is absent:
-
-```json
-{
-  "backend": "bot-bridge",
-  "displayName": "You",
-  "address": "you@example.test",
-  "aliases": [],
-  "webhookUrl": "https://example.com/webhook",
-  "webhookKey": "replace-me"
-}
-```
-
-The public config never includes the webhook URL or the key. Settings shows the URL and `saved` or `not set` for the key. An ingest `account` item replaces the address, display name, and aliases when the bot sends one.
+Bot scripts also read `GBM_APP_ORIGIN`, `GBM_INGEST_URL`, `GBM_INGEST_PATH`, and `GBM_INGEST_FILE`. The token stays in the environment and is never written to a file.
 
 ### Self-host
 
@@ -52,111 +38,33 @@ Install Node.js and npm, then:
 
 ```sh
 npm install
-export APP_PASSWORD="replace-me"
-export SESSION_SECRET="replace-me"
-export INGEST_TOKEN="replace-me"
-# export DATABASE_URL="postgres://user:pass@host/mail"
 npm run dev
 ```
 
-`npm run dev` listens on `0.0.0.0:8080`. The production build targets Vercel. `npm run build` followed by `npm run preview` serves that build on `127.0.0.1:8081`.
+`npm run dev` listens on `0.0.0.0:8080`. With no database URL this is sample mail. For a local database, set `GBM_DEMO=0`.
 
-## Ingest API
-
-Full item shapes and the bot recipe also live in `docs/INGEST.md`, `docs/bot-setup.md`, and `docs/skill/SKILL.md`.
-
-`POST /api/ingest` and `GET /api/ingest/state` expect:
-
-```http
-Authorization: Bearer <INGEST_TOKEN>
+```sh
+npm run build
+npm run preview
 ```
 
-The comparison is constant time. A missing or wrong token is `401` with `{ "error": "unauthorized" }`. An unset or blank `INGEST_TOKEN` is `503` with `{ "error": "unavailable" }`, before the body is read and before the database is opened. These paths are outside the site-password cookie.
+`npm run preview` serves the production build on `127.0.0.1:8081`.
 
-### `POST /api/ingest`
+## Bot
 
-The body is JSON:
+The app exposes ingest and the outbox. The bot speaks to the mail provider. Shapes are in `docs/INGEST.md` and `docs/bot-setup.md`. The setup skill is coming next. `docs/skill/SKILL.md` is only a draft recipe.
 
-```json
-{ "items": [] }
+**Ingest.** `POST /api/ingest` with `Authorization: Bearer` and the ingest token. The body is `{ "items": [] }`, at most 200 items and 5 MB. `html` is a string, at most 1 MiB (1,048,576 UTF-8 bytes). `attachments[].content` is standard base64, at most 1 MiB decoded, and it is kept only when the attachment id matches. `headers` may be a `{ "name", "value" }` list. `GET /api/ingest/state` returns `{ "newest", "counts" }`. These routes are outside the site-password cookie. A wrong token is 401. An unset token is 503.
+
+**Outbox webhook.** On send, the app POSTs `{ "action": "send", "clientSendId" }` to the webhook saved in Settings. That body has no subject and no message text. The bot reads `GET /api/outbox?status=queued` and reports what happened with `POST /api/outbox/:id/status`. Check mail POSTs `{ "action": "sync", "after" }`. A wake that does not return HTTP 200 is retried after 0s, 30s, 2m, 10m, and 1h, on the next request that loads the mailbox or calls ingest or outbox. The app has no cron.
+
+**Live delivery.** The bot should listen for new mail and `POST` it to ingest as it arrives. The app does not open that listener.
+
+**Daily catch-up.** The bot should sweep once a day for mail the live listener missed, then `POST` it to ingest. The app does not run that sweep. The sample outbox row is not listed by `GET /api/outbox` and is not delivered.
+
+```sh
+node bot/convert-ingest.mjs message.eml > items.json
+node bot/push-ingest.mjs items.json
 ```
 
-At most 200 items and 5MB. A larger body is `413` with `{ "error": "too large" }`. Invalid JSON, or a body that is not an object with an `items` array, is `400` with `{ "error": "invalid" }`. The wrong method is `405`.
-
-A successful write is:
-
-```json
-{ "accepted": 0, "skipped": 0 }
-```
-
-`accepted` is how many items were stored. `skipped` counts items that were not stored. Unknown or invalid items are skipped. A `thread` item is always skipped. An attachment whose `path` is absolute, contains `..`, or contains a NUL byte is skipped. An empty path is kept as metadata with no file. A write failure is `503` with `{ "error": "unavailable" }`. The app does not log the body or the token.
-
-`kind` is one of `account`, `thread`, `message`, `attachment`, or `send-result`.
-
-**account.** The latest valid account wins. Fields: `address`, `displayName`, `aliases` (each alias has `email`, `tag`, and `name`).
-
-**thread.** Hint only. Fields: `id`, `messageIds`. It is not stored and does not decide which messages share a thread.
-
-**message.** Stored fields: `id`, `messageId`, `inReplyTo`, `references`, `deliveredTo`, `account`, `from`, `to`, `cc`, `bcc`, `subject`, `body` (or `text`), `html` (stored as `html_body`, at most 1 MiB / 1,048,576 UTF-8 bytes per message; over that cap the plain body is still stored and the HTML already stored stays), `date`, `unread`, `attachments`, `clientSendId`, `threadHint`, `direction`. `from` is required. `id` or `messageId` is required. Addresses are `{ "name", "email" }` or a string. Attachment objects on the message are `{ "id", "filename", "mime", "bytes", "path" }` plus optional `content` (standard base64). Decoded `content` is stored up to 1 MiB (1,048,576 bytes). See `docs/bot-setup.md`. Without `content`, or when it is over the cap or not valid base64, only the metadata is stored and the reader says the file is not downloaded yet.
-
-`date` is ISO-8601. Omitted `unread` defaults to true, and `unread` is written only on insert. Posting the same `id` or `messageId` again updates the content and leaves `unread` as stored. Omitted `threadHint` and `direction` on an update keep the stored values. Star, snooze, labels, folder, and trash are not changed by ingest.
-
-`direction` is `inbound` or `outbound`. Any other value is stored as empty. For display, a missing direction is inbound unless `from` is the account address, which is treated as outbound. Outbound mail is shown as sent by the mailbox owner and listed in Sent.
-
-Messages group by `threadHint` first. A missing or empty hint falls back to In-Reply-To and References, then one normalized subject.
-
-**attachment.** Metadata for a file sent apart from the message. Fields: `id`, `messageId`, `filename`, `mime`, `bytes`, `path`, and optional `content` (the same base64 field as on a message attachment). `filename` is required. The path is a relative location. Empty path is metadata with no file. `content` over 1 MiB, or not valid base64, is dropped and the metadata is still stored.
-
-**send-result.** Outcome of a send. Fields: `clientSendId` (required), `status`, `replyToMessageId`, `sentMessageId`, `error`. `pending` and `waiting` leave the thread on "Waiting for approval in Grok Bot". `failed`, `rejected`, and `error` mark it failed. Any other status, including `sent` and `approved`, marks it sent. Do not post a send-result only because a draft was created. The same item updates the queued send only when `docs/bot-setup.md` allows that transition. The wake is `{ "action": "send", "clientSendId" }`. Read the message with `GET /api/outbox?status=queued`.
-
-Example:
-
-```json
-{
-  "items": [
-    {
-      "kind": "account",
-      "address": "you@example.test",
-      "displayName": "You",
-      "aliases": [{ "email": "you@example.test", "tag": null, "name": "You" }]
-    },
-    {
-      "kind": "message",
-      "id": "msg_a",
-      "messageId": "<a@example.test>",
-      "inReplyTo": null,
-      "references": [],
-      "deliveredTo": "you@example.test",
-      "account": "primary",
-      "from": { "name": "Ada", "email": "ada@example.test" },
-      "to": [{ "name": "You", "email": "you@example.test" }],
-      "cc": [],
-      "bcc": [],
-      "subject": "Quarterly notes",
-      "threadHint": "batch-1",
-      "direction": "inbound",
-      "body": "Notes for the quarter.",
-      "date": "2026-10-01T15:00:00Z",
-      "unread": true,
-      "attachments": []
-    }
-  ]
-}
-```
-
-### `GET /api/ingest/state`
-
-Same bearer token. The response is the newest stored message date and the row counts:
-
-```json
-{
-  "newest": "2026-10-01T15:00:00Z",
-  "counts": { "messages": 1, "attachments": 1, "accounts": 1, "sendResults": 1 }
-}
-```
-
-`newest` is `null` when no message date parses. Use it as the cursor for the next sync. The wrong method is `405`.
-
-## Security
-
-This template ships no keys. There is no database URL, ingest token, site password, session secret, or Vercel project id in the tracked tree. Set those in the host environment. `.env` and `.env.*` are gitignored. Do not commit them, and do not commit a `.vercel/` directory.
+`convert-ingest.mjs` reads a raw message or JSON and writes ingest items. It drops HTML over 1 MiB and attachment bytes over 1 MiB decoded, and it keeps the attachment metadata. `push-ingest.mjs` POSTs that JSON. It refuses a body over 5 MB. Both take the file from argv or `GBM_INGEST_FILE`, and the push target from `GBM_INGEST_URL` or `GBM_APP_ORIGIN` plus `GBM_INGEST_PATH`.
