@@ -11,7 +11,8 @@ import { SESSION_COOKIE, sessionAllowed, signSession, type GateDeps } from "../s
 import { handleIngestApi, upsertMessage } from "../../server/mail/ingest-api.server.ts";
 import { threadsFromMessages } from "../../server/mail/ingest.server.ts";
 import { handleOutboxApi, type OutboxApiDeps } from "../../server/mail/outbox-api.server.ts";
-import { QUEUED_TOAST, outboxStatusLabel } from "./outbox.ts";
+import { deleteOutboundForMailbox } from "../../server/mail/outbound-delete.ts";
+import { QUEUED_TOAST, outboxItemsForThreads, outboxStatusLabel } from "./outbox.ts";
 import { emptyMailbox, inFolder, type Message } from "./model.ts";
 
 const TOKEN = "outbox-test-token";
@@ -212,7 +213,53 @@ describe("outbox copy", () => {
     assert.equal(outboxStatusLabel("declined", null), "Declined");
     assert.equal(outboxStatusLabel("cancelled", null), "Cancelled");
     assert.equal(outboxStatusLabel("failed", "smtp down"), "Failed: smtp down");
-    assert.equal(outboxStatusLabel("failed", null), "Failed: ");
+    assert.equal(outboxStatusLabel("failed", null), "Failed");
+    assert.equal(outboxStatusLabel("failed", ""), "Failed");
+    assert.equal(outboxStatusLabel("failed", "  "), "Failed");
+  });
+
+  it("hides a send whose message is gone and deletes that outbound row", async () => {
+    const row = {
+      fromAddress: "you@example.test",
+      to: ["ada@example.test"],
+      cc: [] as string[],
+      subject: "Hello",
+      text: "Hello",
+      createdAt: "2026-10-01T00:00:00.000Z",
+    };
+    const visible = outboxItemsForThreads(
+      [
+        { ...row, id: "send_gone", status: "failed", error: null },
+        { ...row, id: "send_keep", status: "queued", error: null },
+        { ...row, id: "send_sent", status: "sent", error: null, providerMessageId: "prov-1" },
+      ],
+      [
+        { messages: [{ id: "msg_keep", clientSendId: "send_keep", messageId: null }] },
+        { messages: [{ id: "msg_prov-1", clientSendId: null, messageId: "prov-1" }] },
+      ],
+    );
+    assert.deepEqual(
+      visible.map((item) => item.id),
+      ["send_keep", "send_sent"],
+    );
+
+    const db = await database();
+    try {
+      await db.sql.query(
+        `insert into mail_outbound (client_send_id, thread_id, spec, status, created_at, provider_message_id) values
+         ('send_gone', 'thr_gone', '{}', 'failed', '2026-10-01T00:00:00.000Z', null),
+         ('send_keep', 'thr_keep', '{}', 'queued', '2026-10-01T00:00:00.000Z', null),
+         ('send_prov', 'thr_other', '{}', 'sent', '2026-10-01T00:00:00.000Z', 'prov-1')`,
+      );
+      await deleteOutboundForMailbox(db.sql, ["thr_gone"], ["prov-1"]);
+      const left = await db.sql.query<{ client_send_id: string }>(`select client_send_id from mail_outbound order by client_send_id`);
+      assert.deepEqual(
+        left.map((item) => item.client_send_id),
+        ["send_keep"],
+      );
+    } finally {
+      await db.close();
+    }
   });
 });
 

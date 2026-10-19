@@ -13,6 +13,10 @@ export type OutboxItem = {
   error: string | null;
   /** ISO time the row was queued. The folder lists newest first. */
   createdAt: string;
+  /** Provider id from a sent row. Used to tell if that message is still in the mailbox. */
+  providerMessageId?: string | null;
+  /** RFC message id stored on the send, when the row has one. */
+  messageId?: string | null;
 };
 
 export const OUTBOX_WAITING = "Waiting for your OK in Grok Bot";
@@ -76,7 +80,30 @@ export function outboxStatusLabel(status: OutboxStatus, error: string | null): s
   if (status === "sent") return "Sent";
   if (status === "declined") return "Declined";
   if (status === "cancelled") return "Cancelled";
-  return `Failed: ${error ?? ""}`;
+  const reason = error?.trim() ?? "";
+  return reason ? `Failed: ${reason}` : "Failed";
+}
+
+type OutboxThread = {
+  messages: readonly { id: string; clientSendId?: string | null; messageId?: string | null }[];
+};
+
+/** Outbox rows whose message is still in a visible thread. A deleted send is omitted. */
+export function outboxItemsForThreads(items: readonly OutboxItem[], threads: readonly OutboxThread[]): OutboxItem[] {
+  const keys = new Set<string>();
+  for (const thread of threads) {
+    for (const message of thread.messages) {
+      if (message.id) keys.add(message.id);
+      if (message.clientSendId) keys.add(message.clientSendId);
+      if (message.messageId) keys.add(message.messageId);
+    }
+  }
+  return items.filter((item) => {
+    if (keys.has(item.id)) return true;
+    if (item.messageId && keys.has(item.messageId)) return true;
+    if (item.providerMessageId && (keys.has(item.providerMessageId) || keys.has(`msg_${item.providerMessageId}`))) return true;
+    return false;
+  });
 }
 
 export function outboxBadgeCount(items: readonly OutboxItem[]): number {
