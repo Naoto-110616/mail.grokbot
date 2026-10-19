@@ -84,4 +84,4 @@ node bot/convert-ingest.mjs message.eml > items.json
 node bot/push-ingest.mjs items.json
 ```
 
-`convert-ingest.mjs` reads a raw message or JSON and writes ingest items. It drops HTML over 1 MiB and attachment bytes over 1 MiB decoded, and it keeps the attachment metadata. `push-ingest.mjs` POSTs that JSON. It refuses a body over 5 MB. Both take the file from argv or `GBM_INGEST_FILE`, and the push target from `GBM_INGEST_URL` or `GBM_APP_ORIGIN` plus `GBM_INGEST_PATH`.
+`convert-ingest.mjs` reads a raw message or JSON and writes ingest items. It keeps `deliveredTo` and `account` on each message, including a `Delivered-To` or `X-Original-To` header, so the plus-tag survives. It drops HTML over 1 MiB and attachment bytes over 1 MiB decoded, and it keeps the attachment metadata. `push-ingest.mjs` POSTs that JSON. It refuses a body over 5 MB. Both take the file from argv or `GBM_INGEST_FILE`, and the push target from `GBM_INGEST_URL` or `GBM_APP_ORIGIN` plus `GBM_INGEST_PATH`.

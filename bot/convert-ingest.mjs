@@ -162,6 +162,13 @@ export function normalizeMessage(row, contentById = {}) {
     body,
     date: isoDate(row.date),
   };
+  const deliveredTo =
+    stringOf(row.deliveredTo) ||
+    headerValue(headers, "delivered-to") ||
+    headerValue(headers, "x-original-to");
+  if (deliveredTo) item.deliveredTo = deliveredTo;
+  const account = stringOf(row.account);
+  if (account) item.account = account;
   if (messageId) item.messageId = messageId;
   const inReplyTo = stringOf(row.inReplyTo);
   if (inReplyTo) item.inReplyTo = inReplyTo;

@@ -78,6 +78,58 @@ test("converts a message, drops oversize html and attachment bytes, and keeps he
   assert.equal(JSON.stringify(mapped).includes("att_missing"), false);
 });
 
+test("keeps deliveredTo and account so the plus-tag survives", () => {
+  const fromJson = convertInput(
+    JSON.stringify({
+      kind: "message",
+      id: "msg_a",
+      from: "ada@example.com",
+      to: "you@example.com",
+      subject: "Notes",
+      body: "Hello",
+      deliveredTo: "you+ops@example.com",
+      account: "primary",
+      headers: { "Delivered-To": "you+other@example.com" },
+    }),
+  );
+  assert.equal(fromJson.items[0].deliveredTo, "you+ops@example.com");
+  assert.equal(fromJson.items[0].account, "primary");
+  assert.equal(fromJson.items[0].id, "msg_a");
+
+  const fromHeader = normalizeMessage({
+    from: "ada@example.com",
+    subject: "Tag",
+    body: "Hi",
+    headers: [{ name: "Delivered-To", value: "You <you+books@example.com>" }],
+    account: "books",
+  });
+  assert.equal(fromHeader.deliveredTo, "You <you+books@example.com>");
+  assert.equal(fromHeader.account, "books");
+
+  const originalTo = normalizeMessage({
+    from: "ada@example.com",
+    subject: "Alt",
+    body: "Hi",
+    headers: { "X-Original-To": "you+ops@example.com" },
+  });
+  assert.equal(originalTo.deliveredTo, "you+ops@example.com");
+  assert.equal("account" in originalTo, false);
+
+  const raw = [
+    "From: Ada <ada@example.com>",
+    "To: you@example.com",
+    "Delivered-To: you+ops@example.com",
+    "Subject: Tagged",
+    "Message-ID: <tagged@example.com>",
+    "Date: Sat, 18 Oct 2026 15:00:00 +0000",
+    "",
+    "Body",
+  ].join("\n");
+  const mime = convertInput(raw);
+  assert.equal(mime.items[0].deliveredTo, "you+ops@example.com");
+  assert.equal("account" in mime.items[0], false);
+});
+
 test("converts a raw message and a simple multipart message", () => {
   const raw = [
     "From: Ada Lovelace <ada@example.com>",
