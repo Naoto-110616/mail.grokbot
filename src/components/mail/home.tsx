@@ -5,9 +5,11 @@ import { useMail } from "@/lib/mail/store";
 export function MailHome({
   messageId = null,
   threadId = null,
+  outboxId = null,
 }: {
   messageId?: string | null;
   threadId?: string | null;
+  outboxId?: string | null;
 }) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -30,5 +32,5 @@ export function MailHome({
       </main>
     );
   }
-  return <MailShell messageId={messageId} threadId={threadId} />;
+  return <MailShell messageId={messageId} threadId={threadId} outboxId={outboxId} />;
 }

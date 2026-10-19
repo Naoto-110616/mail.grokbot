@@ -1,12 +1,15 @@
+import { useNavigate } from "@tanstack/react-router";
 import { Check, Clock, Inbox, MailOpen, Menu, PenLine, Search, Star, Tag, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconButton } from "@/components/mail/bits";
 import { Compose } from "@/components/mail/compose";
+import { OutboxSendView } from "@/components/mail/outbox-view";
 import { Overlays } from "@/components/mail/overlays";
 import { Reader } from "@/components/mail/reader";
 import { Sidebar } from "@/components/mail/sidebar";
 import { ThreadList } from "@/components/mail/thread-list";
-import { resolveDeepLink } from "@/lib/mail/deep-link";
+import { resolveDeepLink, safeDeepLinkId } from "@/lib/mail/deep-link";
+import { sentCopyForOutbox } from "@/lib/mail/outbox";
 import { readKind, starKind } from "@/lib/mail/batch";
 import { unreadIn, resolveTheme, visibleThreads } from "@/lib/mail/model";
 import { recentSearchesOf, savedSearchesOf, SEARCH_SUGGESTIONS } from "@/lib/mail/search";
@@ -42,9 +45,11 @@ function isTyping(target: EventTarget | null) {
 export function MailShell({
   messageId = null,
   threadId = null,
+  outboxId = null,
 }: {
   messageId?: string | null;
   threadId?: string | null;
+  outboxId?: string | null;
 }) {
   const desktop = useIsDesktop();
   const now = useNow();
@@ -81,17 +86,34 @@ export function MailShell({
   const setPalette = useMail((s) => s.setPalette);
   const dismissToast = useMail((s) => s.dismissToast);
   const settingsOpen = useMail((s) => s.settingsOpen);
+  const outbox = useMail((s) => s.outbox ?? []);
+  const cancelOutbox = useMail((s) => s.cancelOutbox);
+  const retryOutbox = useMail((s) => s.retryOutbox);
+  const editOutboxAsDraft = useMail((s) => s.editOutboxAsDraft);
+  const navigate = useNavigate();
 
   const showDone = useMail((s) => s.showDone);
   const rows = visibleThreads({ threads, folder, category, query, now, aliases, labels, account, showDone });
   const split = desktop && settings.pane === "right";
-  const showReader = Boolean(split || (viewing === "thread" && openId));
-  const showList = split || !showReader;
+  const outboxKey = safeDeepLinkId(outboxId);
+  const outboxItem = outboxKey ? (outbox.find((item) => item.id === outboxKey) ?? null) : null;
+  const sentTarget = outboxItem ? sentCopyForOutbox(outboxItem, threads) : null;
+  const showOutboxSend = Boolean(outboxItem && !sentTarget);
+  const showReader = !showOutboxSend && Boolean(split || (viewing === "thread" && openId));
+  const showList = split || (!showReader && !showOutboxSend);
+  const readingOutbox = showOutboxSend && !desktop;
   const inboxUnread = unreadIn(threads, "inbox", now, aliases, account);
   const checkedThreads = threads.filter((thread) => checked.includes(thread.id));
   const readAction = readKind(checkedThreads);
   const starAction = starKind(checkedThreads);
   const openedLink = useRef<string | null>(null);
+  const outboxRouteRef = useRef<string | null>(null);
+  outboxRouteRef.current = outboxKey;
+  const leaveOutboxRef = useRef<() => void>(() => {});
+  leaveOutboxRef.current = () => {
+    useMail.getState().setFolder("outbox");
+    void navigate({ to: "/" });
+  };
 
   useEffect(() => {
     const key = messageId ? `m:${messageId}` : threadId ? `t:${threadId}` : "";
@@ -103,6 +125,26 @@ export function MailShell({
     state.openThread(target.threadId);
     if (target.focusMessageId) state.focusMessage(target.focusMessageId);
   }, [messageId, threadId, threads]);
+
+  useEffect(() => {
+    const id = safeDeepLinkId(outboxId);
+    if (!id) return;
+    const state = useMail.getState();
+    const item = (state.outbox ?? []).find((row) => row.id === id);
+    if (!item) {
+      if (state.folder !== "outbox") state.setFolder("outbox");
+      return;
+    }
+    const key = `o:${id}`;
+    if (openedLink.current === key) return;
+    openedLink.current = key;
+    const sent = sentCopyForOutbox(item, state.threads);
+    state.setFolder("outbox");
+    if (sent) {
+      state.openThread(sent.threadId);
+      state.focusMessage(sent.messageId);
+    }
+  }, [outboxId, outbox, threads]);
 
   useEffect(() => {
     if (viewing === "thread" && openId && !threads.some((thread) => thread.id === openId)) {
@@ -149,6 +191,10 @@ export function MailShell({
         return;
       }
       const splitNow = window.innerWidth >= 1024 && s.settings.pane === "right";
+      if (outboxRouteRef.current) {
+        leaveOutboxRef.current();
+        return;
+      }
       if (!splitNow && s.viewing === "thread") s.backToList();
     }
     function idsForKey() {
@@ -386,12 +432,37 @@ export function MailShell({
               }
               useMail.getState().openThread(id);
             }}
+            onOpenOutbox={(id) => {
+              void navigate({ to: "/o/$clientSendId", params: { clientSendId: id } });
+            }}
           />
         )}
-        {showReader && <Reader split={split} onBack={() => useMail.getState().backToList()} />}
+        {showOutboxSend && outboxItem && (
+          <OutboxSendView
+            item={outboxItem}
+            split={split}
+            onBack={() => leaveOutboxRef.current()}
+            onCancel={cancelOutbox}
+            onRetry={retryOutbox}
+            onEdit={(id) => {
+              void editOutboxAsDraft(id).then((ok) => {
+                if (ok) leaveOutboxRef.current();
+              });
+            }}
+          />
+        )}
+        {showReader && (
+          <Reader
+            split={split}
+            onBack={() => {
+              if (outboxRouteRef.current) leaveOutboxRef.current();
+              else useMail.getState().backToList();
+            }}
+          />
+        )}
       </div>
 
-      {!(viewing === "thread" && !desktop) && !settingsOpen && (
+      {!(viewing === "thread" && !desktop) && !settingsOpen && !readingOutbox && (
         <nav
           className="glass safe-bottom fixed bottom-2 left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] z-30 flex min-w-0 max-w-full items-end justify-around overflow-hidden rounded-full px-1 pt-1 lg:hidden"
           aria-label={checked.length > 0 ? "Batch" : "Primary"}

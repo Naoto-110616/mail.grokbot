@@ -16,7 +16,7 @@ import { loadMailConfig, saveMailboxConnection, toPublicConfig } from "../../ser
 import { handleOutboxApi, transitionOutbound, type OutboxApiDeps } from "../../server/mail/outbox-api.server.ts";
 import { recordWakeResult, requeueFailedSend, runDueWakes } from "../../server/mail/wake.server.ts";
 import { deleteOutboundForMailbox } from "../../server/mail/outbound-delete.ts";
-import { QUEUED_TOAST, outboxItemsForThreads, outboxStatusLabel } from "./outbox.ts";
+import { QUEUED_TOAST, outboxEditAsDraftAllowed, outboxItemsForThreads, outboxStatusLabel, sentCopyForOutbox } from "./outbox.ts";
 import { WAKE_LEASE_MS } from "./wake-retry.ts";
 import { emptyMailbox, inFolder, type Message } from "./model.ts";
 
@@ -230,6 +230,43 @@ describe("outbox copy", () => {
     assert.equal(outboxStatusLabel("failed", null), "Failed");
     assert.equal(outboxStatusLabel("failed", ""), "Failed");
     assert.equal(outboxStatusLabel("failed", "  "), "Failed");
+  });
+
+  it("opens the sent copy and edits a draft only while cancel is allowed", () => {
+    const waiting = { id: "msg_wait", clientSendId: "send_1", messageId: "<wait@example.test>" };
+    const sent = { id: "msg_prov-9", clientSendId: "send_1", messageId: "prov-9" };
+    const threads = [
+      { id: "thr_wait", messages: [waiting] },
+      { id: "thr_sent", messages: [sent] },
+    ];
+    assert.equal(sentCopyForOutbox({ id: "send_1", status: "queued", providerMessageId: "prov-9" }, threads), null);
+    assert.deepEqual(sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: "prov-9" }, threads), {
+      threadId: "thr_sent",
+      messageId: "msg_prov-9",
+    });
+    assert.deepEqual(
+      sentCopyForOutbox({ id: "send_2", status: "sent", providerMessageId: "prov-9" }, [
+        { id: "thr_a", messages: [{ id: "other", messageId: "prov-9", clientSendId: "send_other" }] },
+      ]),
+      { threadId: "thr_a", messageId: "other" },
+    );
+    assert.deepEqual(sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: null }, threads), {
+      threadId: "thr_wait",
+      messageId: "msg_wait",
+    });
+    assert.deepEqual(
+      sentCopyForOutbox({ id: "send_1", status: "sent", providerMessageId: "prov-9" }, [
+        { id: "thr_wait", messages: [waiting] },
+        { id: "thr_sent", messages: [sent] },
+      ]),
+      { threadId: "thr_sent", messageId: "msg_prov-9" },
+    );
+    for (const status of ["queued", "waiting", "pending"]) {
+      assert.equal(outboxEditAsDraftAllowed(status), true, status);
+    }
+    for (const status of ["failed", "sent", "awaiting_approval", "declined", "cancelled"]) {
+      assert.equal(outboxEditAsDraftAllowed(status), false, status);
+    }
   });
 
   it("hides a send whose message is gone and deletes that outbound row", async () => {

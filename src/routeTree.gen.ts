@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MMessageIdRouteImport } from './routes/m/$messageId'
+import { Route as OClientSendIdRouteImport } from './routes/o/$clientSendId'
 import { Route as TThreadIdRouteImport } from './routes/t/$threadId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +30,11 @@ const MMessageIdRoute = MMessageIdRouteImport.update({
   path: '/m/$messageId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OClientSendIdRoute = OClientSendIdRouteImport.update({
+  id: '/o/$clientSendId',
+  path: '/o/$clientSendId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TThreadIdRoute = TThreadIdRouteImport.update({
   id: '/t/$threadId',
   path: '/t/$threadId',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/m/$messageId': typeof MMessageIdRoute
+  '/o/$clientSendId': typeof OClientSendIdRoute
   '/t/$threadId': typeof TThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/m/$messageId': typeof MMessageIdRoute
+  '/o/$clientSendId': typeof OClientSendIdRoute
   '/t/$threadId': typeof TThreadIdRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,22 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/m/$messageId': typeof MMessageIdRoute
+  '/o/$clientSendId': typeof OClientSendIdRoute
   '/t/$threadId': typeof TThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/m/$messageId' | '/t/$threadId'
+  fullPaths: '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/m/$messageId' | '/t/$threadId'
-  id: '__root__' | '/' | '/login' | '/m/$messageId' | '/t/$threadId'
+  to: '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
+  id: '__root__' | '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   MMessageIdRoute: typeof MMessageIdRoute
+  OClientSendIdRoute: typeof OClientSendIdRoute
   TThreadIdRoute: typeof TThreadIdRoute
 }
 
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MMessageIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/o/$clientSendId': {
+      id: '/o/$clientSendId'
+      path: '/o/$clientSendId'
+      fullPath: '/o/$clientSendId'
+      preLoaderRoute: typeof OClientSendIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/t/$threadId': {
       id: '/t/$threadId'
       path: '/t/$threadId'
@@ -106,6 +123,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   MMessageIdRoute: MMessageIdRoute,
+  OClientSendIdRoute: OClientSendIdRoute,
   TThreadIdRoute: TThreadIdRoute,
 }
 export const routeTree = rootRouteImport

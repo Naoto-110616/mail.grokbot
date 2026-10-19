@@ -156,6 +156,9 @@ describe("site gate", () => {
     );
     assert.equal(thread?.status, 302);
     assert.equal(thread?.headers.get("location"), "/login?next=%2Ft%2Fthr_a_example_test");
+    const queued = await handleGate(get("/o/send_1"), { ...ctx, pathname: "/o/send_1" }, deps);
+    assert.equal(queued?.status, 302);
+    assert.equal(queued?.headers.get("location"), "/login?next=%2Fo%2Fsend_1");
 
     const wrong = await handleGate(
       loginRequest("not-the-password", "/m/msg_859543"),
@@ -176,6 +179,8 @@ describe("site gate", () => {
     const cookie = `${SESSION_COOKIE}=${tokenFrom(signedIn!)}`;
     const opened = await handleGate(get("/m/msg_859543", cookie), { ...ctx, pathname: "/m/msg_859543" }, deps);
     assert.equal(opened, null);
+    const openedOutbox = await handleGate(get("/o/send_1", cookie), { ...ctx, pathname: "/o/send_1" }, deps);
+    assert.equal(openedOutbox, null);
     const already = await handleGate(
       get("/login?next=%2Ft%2Fthr_a_example_test", cookie),
       { ...ctx, pathname: "/login" },

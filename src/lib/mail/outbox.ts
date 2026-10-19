@@ -17,6 +17,8 @@ export type OutboxItem = {
   providerMessageId?: string | null;
   /** RFC message id stored on the send, when the row has one. */
   messageId?: string | null;
+  /** Queued HTML body. The view sanitizes it. Blank means the plain text is shown. */
+  html?: string | null;
 };
 
 export const OUTBOX_WAITING = "Waiting for your OK in Grok Bot";
@@ -113,4 +115,38 @@ export function outboxBadgeCount(items: readonly OutboxItem[]): number {
 
 export function sentMessageIdForProvider(providerMessageId: string): string {
   return `msg_${providerMessageId}`;
+}
+
+/**
+ * Edit as draft cancels the send first. The only user transition that does that
+ * is queued → cancelled (DELETE). Failed rows can Retry; they cannot be cancelled.
+ */
+export function outboxEditAsDraftAllowed(status: string): boolean {
+  return outboxTransitionAllowed(status, "cancelled");
+}
+
+type SentCopyThread = {
+  id: string;
+  messages: readonly { id: string; clientSendId?: string | null; messageId?: string | null }[];
+};
+
+/** The mailbox copy of a sent row. Provider id wins over the queued message that shares the send id. */
+export function sentCopyForOutbox(
+  item: Pick<OutboxItem, "id" | "status" | "providerMessageId">,
+  threads: readonly SentCopyThread[],
+): { threadId: string; messageId: string } | null {
+  if (item.status !== "sent") return null;
+  const provider = item.providerMessageId?.trim() ?? "";
+  const sentId = provider ? sentMessageIdForProvider(provider) : "";
+  let byClient: { threadId: string; messageId: string } | null = null;
+  for (const thread of threads) {
+    for (const message of thread.messages) {
+      if (sentId && message.id === sentId) return { threadId: thread.id, messageId: message.id };
+      if (provider && message.messageId === provider) return { threadId: thread.id, messageId: message.id };
+      if (!byClient && message.clientSendId && message.clientSendId === item.id) {
+        byClient = { threadId: thread.id, messageId: message.id };
+      }
+    }
+  }
+  return byClient;
 }

@@ -12,6 +12,7 @@ describe("deep link routing", () => {
   it("opens a message id inside its thread and a thread id on its own", () => {
     assert.equal(safeDeepLinkId("msg_859543"), "msg_859543");
     assert.equal(safeDeepLinkId("thr_a_example_test"), "thr_a_example_test");
+    assert.equal(safeDeepLinkId("send_00000000-0000-4000-8000-000000000000"), "send_00000000-0000-4000-8000-000000000000");
     assert.deepEqual(resolveDeepLink(threads, { messageId: "msg_859543" }), {
       threadId: "thr_a_example_test",
       focusMessageId: "msg_859543",
@@ -47,5 +48,23 @@ describe("deep link routing", () => {
     assert.match(thread, /safeDeepLinkId/);
     assert.equal(message.includes("dangerouslySetInnerHTML"), false);
     assert.equal(thread.includes("dangerouslySetInnerHTML"), false);
+  });
+
+  it("registers /o/$clientSendId as a real route", () => {
+    const tree = readFileSync(new URL("../../routeTree.gen.ts", import.meta.url), "utf8");
+    const route = readFileSync(new URL("../../routes/o/$clientSendId.tsx", import.meta.url), "utf8");
+    const view = readFileSync(new URL("../../components/mail/outbox-view.tsx", import.meta.url), "utf8");
+    assert.match(tree, /\/o\/\$clientSendId/);
+    assert.match(route, /\/o\/\$clientSendId/);
+    assert.match(route, /safeDeepLinkId/);
+    assert.match(route, /outboxId/);
+    assert.equal(route.includes("dangerouslySetInnerHTML"), false);
+    assert.equal(view.includes("dangerouslySetInnerHTML"), false);
+    assert.match(view, /HtmlMail/);
+    assert.match(view, /htmlIsVisible/);
+    assert.match(view, /outboxStatusLabel/);
+    assert.match(view, /Edit as draft/);
+    assert.match(view, /Cancel/);
+    assert.match(view, /Retry/);
   });
 });

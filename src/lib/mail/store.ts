@@ -41,6 +41,7 @@ import {
   withSignature,
 } from "@/lib/mail/model";
 import { DONE_HOLD_MS, DONE_TOAST, popUndo, pushUndo, waitUntilOnline } from "@/lib/mail/done";
+import { outboxEditAsDraftAllowed } from "@/lib/mail/outbox";
 
 export type ComposeModel = {
   mode: DraftMode;
@@ -144,6 +145,8 @@ type State = MailData &
     send: () => void;
     cancelOutbox: (id: string) => void;
     retryOutbox: (id: string) => void;
+    /** Cancel a queued send and open it in compose. False when that transition is not allowed. */
+    editOutboxAsDraft: (id: string) => Promise<boolean>;
     sendQuick: (threadId: string, replyId: string, mode: "reply" | "replyAll") => void;
     dismissCompose: () => void;
     addFilter: (filter: Omit<Filter, "id">) => void;
@@ -276,9 +279,10 @@ export const useMail = create<State>()(
     (set, get) => {
       let chain = Promise.resolve();
       let actionGen = 0;
-      const enqueue = (task: () => Promise<void>) => {
+      const enqueue = <T,>(task: () => Promise<T>): Promise<T | undefined> => {
         const run = chain.then(task).catch(() => {
           set({ toast: { text: "Mail action failed", snapshot: null } });
+          return undefined;
         });
         chain = run.then(() => undefined);
         return run;
@@ -698,6 +702,46 @@ export const useMail = create<State>()(
               set({ toast: { text: "Could not retry that send", snapshot: null } });
             }
           });
+        },
+
+        editOutboxAsDraft: (id) => {
+          const item = (get().outbox ?? []).find((row) => row.id === id);
+          if (!item || !outboxEditAsDraftAllowed(item.status)) return Promise.resolve(false);
+          const from = item.fromAddress || get().settings.defaultFrom;
+          const compose: ComposeModel = {
+            mode: "new",
+            threadId: null,
+            draftThreadId: null,
+            replyToId: null,
+            from,
+            to: item.to.join(", "),
+            cc: item.cc.join(", "),
+            bcc: "",
+            showCc: item.cc.length > 0,
+            showBcc: false,
+            subject: item.subject,
+            body: item.text,
+            attachments: [],
+            minimized: false,
+            expanded: false,
+          };
+          return enqueue(async () => {
+            const response = await fetch(`/api/outbox/${encodeURIComponent(id)}`, {
+              method: "DELETE",
+              credentials: "same-origin",
+            });
+            if (response.status === 409) {
+              set({ toast: { text: "That send can no longer be edited", snapshot: null } });
+              return false;
+            }
+            if (!response.ok) {
+              set({ toast: { text: "Could not edit that send", snapshot: null } });
+              return false;
+            }
+            const incoming = await getActiveBackend().bootstrap(dataOf(get()));
+            commit(incoming, { compose, toast: { text: "Draft", snapshot: null } });
+            return true;
+          }).then((ok) => ok === true);
         },
 
         sendQuick: (threadId, replyId, mode) => {

@@ -38,6 +38,7 @@ import { loadStoredIngest } from "./ingest-api.server.ts";
 import {
   applySendResults,
   deliveryForStatus,
+  parseHtmlBody,
   withOutboundOwner,
   type IngestIdentity,
   type SendResult,
@@ -226,6 +227,7 @@ async function readOverlay(): Promise<Overlay | null> {
         createdAt: row.created_at || message.date,
         providerMessageId: row.provider_message_id,
         messageId: message.messageId,
+        html: parseHtmlBody(message.html),
       });
     }
 

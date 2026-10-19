@@ -27,10 +27,12 @@ export function ThreadList({
   rows,
   now,
   onOpen,
+  onOpenOutbox,
 }: {
   rows: Thread[];
   now: number;
   onOpen: (id: string) => void;
+  onOpenOutbox: (id: string) => void;
 }) {
   const folder = useMail((s) => s.folder);
   const category = useMail((s) => s.category);
@@ -142,7 +144,7 @@ export function ThreadList({
   const showStrip = folder === "inbox" && !query && !gateList && gate.mode === "before" && senderCards.length > 0;
 
   if (folder === "outbox") {
-    return <OutboxList items={outbox} onCancel={cancelOutbox} onRetry={retryOutbox} onCheck={checkMail} />;
+    return <OutboxList items={outbox} onOpen={onOpenOutbox} onCancel={cancelOutbox} onRetry={retryOutbox} onCheck={checkMail} />;
   }
 
   return (
@@ -761,11 +763,13 @@ function byNewest(a: OutboxItem, b: OutboxItem): number {
 
 function OutboxList({
   items,
+  onOpen,
   onCancel,
   onRetry,
   onCheck,
 }: {
   items: OutboxItem[];
+  onOpen: (id: string) => void;
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
   onCheck: () => void;
@@ -796,33 +800,40 @@ function OutboxList({
               const cc = item.cc.filter(Boolean).join(", ");
               const who = [to ? `To: ${to}` : "To: —", cc ? `Cc: ${cc}` : ""].filter(Boolean).join(" · ");
               return (
-                <li
-                  key={item.id}
-                  className="min-w-0 max-w-full border-b border-line py-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]"
-                >
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="min-w-0 flex-1 truncate text-sm font-bold">{item.subject || "(no subject)"}</span>
-                    <span className="shrink-0 text-xs text-muted tabular-nums">{formatWhen(item.createdAt)}</span>
-                  </span>
-                  <p className="truncate text-base text-muted">{who}</p>
-                  <p className="mt-1 text-base">{outboxStatusLabel(item.status, item.error)}</p>
+                <li key={item.id} className="min-w-0 max-w-full border-b border-line">
+                  <button
+                    type="button"
+                    className="block w-full min-w-0 max-w-full py-3 text-left pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]"
+                    onClick={() => onOpen(item.id)}
+                  >
+                    <span className="flex min-w-0 items-baseline gap-2">
+                      <span className="min-w-0 flex-1 truncate text-sm font-bold">{item.subject || "(no subject)"}</span>
+                      <span className="shrink-0 text-xs text-muted tabular-nums">{formatWhen(item.createdAt)}</span>
+                    </span>
+                    <span className="block truncate text-base text-muted">{who}</span>
+                    <span className="mt-1 block text-base">{outboxStatusLabel(item.status, item.error)}</span>
+                  </button>
                   {item.status === "queued" ? (
-                    <button
-                      type="button"
-                      className="mt-2 h-11 rounded-full bg-ink/5 px-3 text-base font-semibold"
-                      onClick={() => onCancel(item.id)}
-                    >
-                      Cancel
-                    </button>
+                    <div className="pb-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+                      <button
+                        type="button"
+                        className="h-11 rounded-full bg-ink/5 px-3 text-base font-semibold"
+                        onClick={() => onCancel(item.id)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   ) : null}
                   {item.status === "failed" ? (
-                    <button
-                      type="button"
-                      className="mt-2 h-11 rounded-full bg-ink/5 px-3 text-base font-semibold"
-                      onClick={() => onRetry(item.id)}
-                    >
-                      Retry
-                    </button>
+                    <div className="pb-3 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+                      <button
+                        type="button"
+                        className="h-11 rounded-full bg-ink/5 px-3 text-base font-semibold"
+                        onClick={() => onRetry(item.id)}
+                      >
+                        Retry
+                      </button>
+                    </div>
                   ) : null}
                 </li>
               );
