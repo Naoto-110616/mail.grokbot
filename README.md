@@ -4,9 +4,13 @@ Grokbot Mail is a mailbox screen for one person and one bot. The bot delivers ma
 
 With no `DATABASE_URL`, or with `GBM_DEMO=1`, the app shows invented mail at `you@example.com`. Nothing in that mailbox was sent or received. Set `GBM_DEMO=0` to use a database instead (embedded PGLite when `DATABASE_URL` is unset). A site password still locks the sample inbox.
 
+## Easiest way: install the Grokbot Mail bot template
+
+Install the [Grokbot Mail bot template](https://x.ai/bot/vHWtUqHtdpfhnwTFOfEVT). A new bot asks for your inbox, +tags, display name, and Vercel account, then deploys your own copy and wires the routines.
+
 ## Deploy on Vercel with Neon
 
-Neon is required for real mail. Without a Neon database, the app shows sample mail only.
+The Deploy with Vercel button is the manual path. Neon is required for real mail. Without a Neon database, the app shows sample mail only.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FPhillipHolland%2Fmail.grokbot&env=GBM_SITE_PASSWORD,GBM_SESSION_SECRET,GBM_INGEST_TOKEN,GBM_INBOX_ADDRESS,GBM_OWNER_NAME,GBM_TAGS&envDescription=GBM_SITE_PASSWORD%20locks%20the%20site.%20GBM_SESSION_SECRET%20signs%20the%20session%20cookie.%20GBM_INGEST_TOKEN%20is%20the%20bearer%20token%20for%20ingest%20and%20the%20outbox.%20GBM_INBOX_ADDRESS%20is%20the%20mailbox%20address.%20GBM_OWNER_NAME%20is%20the%20name%20on%20sent%20mail.%20GBM_TAGS%20lists%20plus-tags%20such%20as%20ops%2Cbooks%3AReading.&envLink=https%3A%2F%2Fgithub.com%2FPhillipHolland%2Fmail.grokbot%23deploy-on-vercel-with-neon&project-name=grokbot-mail&repository-name=grokbot-mail&stores=%5B%7B%22type%22%3A%22integration%22%2C%22integrationSlug%22%3A%22neon%22%2C%22productSlug%22%3A%22neon%22%7D%5D)
 
@@ -69,7 +73,7 @@ npm run preview
 
 ## Bot
 
-The app exposes ingest and the outbox. The bot speaks to the mail provider. Shapes are in `docs/INGEST.md` and `docs/bot-setup.md`. The setup skill is coming next. It is not in this repo yet.
+The app exposes ingest and the outbox. The bot speaks to the mail provider. Shapes are in `docs/INGEST.md` and `docs/bot-setup.md`. Install the [Grokbot Mail bot template](https://x.ai/bot/vHWtUqHtdpfhnwTFOfEVT) to deploy your own copy and wire the routines.
 
 **Ingest.** `POST /api/ingest` with `Authorization: Bearer` and the ingest token. The body is `{ "items": [] }`, at most 200 items and 5 MB. `html` is a string, at most 1 MiB (1,048,576 UTF-8 bytes). `attachments[].content` is standard base64, at most 1 MiB decoded, and it is kept only when the attachment id matches. `headers` may be a `{ "name", "value" }` list. `GET /api/ingest/state` returns `{ "newest", "counts" }`. These routes are outside the site-password cookie. A wrong token is 401. An unset token is 503.
 

@@ -1,5 +1,9 @@
 # Bot send bridge
 
+## Easiest way: install the Grokbot Mail bot template
+
+Install the [Grokbot Mail bot template](https://x.ai/bot/vHWtUqHtdpfhnwTFOfEVT). A new bot asks for your inbox, +tags, display name, and Vercel account, then deploys your own copy and wires the routines. The Deploy with Vercel button in the README is the manual path.
+
 The app owns outbound delivery. Send stores the message on `mail_outbound` and immediately POSTs a wake to the Grok Bot routine webhook. The wake body is only the send id. The bot reads the message with `GET /api/outbox` and reports what happened. The app does not poll, and it does not run a backup sweep.
 
 When the webhook is not saved, the send stays queued and the app says `Sending…`. A failed wake stays on that same line while retries remain.
