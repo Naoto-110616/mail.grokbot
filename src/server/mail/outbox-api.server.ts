@@ -8,7 +8,7 @@ import {
   type OutboxStatus,
 } from "../../lib/mail/outbox.ts";
 import { normalizePath } from "../../lib/site-gate/paths.ts";
-import type { SendResult } from "./ingest.server.ts";
+import { parseHtmlBody, type SendResult } from "./ingest.server.ts";
 import { ingestTokenMatches, upsertMessage } from "./ingest-api.server.ts";
 import { runDueWakes } from "./wake.server.ts";
 
@@ -209,6 +209,7 @@ async function insertSentMessage(sql: Sql, row: OutboundRow, providerMessageId: 
     bcc: [],
     subject: typeof spec.subject === "string" ? spec.subject : "",
     body: typeof spec.body === "string" ? spec.body : "",
+    html: parseHtmlBody(spec.html),
     date: new Date().toISOString(),
     attachments: asAttachments(spec.attachments),
     delivery: "sent",

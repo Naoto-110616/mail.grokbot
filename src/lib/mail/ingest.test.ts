@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { readIngestBytes, resolveInside } from "../../server/mail/attachments.server.ts";
-import { applySendResults, classifyIngestItem, deliveryForStatus, fromJsonWithSignals, loadIngest, readMailSignals, threadsFromMessages, withOutboundOwner } from "../../server/mail/ingest.server.ts";
+import { applySendResults, classifyIngestItem, deliveryForStatus, fromJsonWithSignals, HTML_BODY_MAX_BYTES, loadIngest, parseHtmlBody, readMailSignals, threadsFromMessages, withOutboundOwner } from "../../server/mail/ingest.server.ts";
 import { groupByHeaders, type ThreadableMessage } from "./threading.ts";
 import { ATTACHMENT_CONTENT_MAX_BYTES, attachmentContentBase64, inFolder, listSender, mineSet, type Message, type Thread } from "./model.ts";
 
@@ -283,5 +283,47 @@ describe("ingest fixtures", () => {
     assert.equal(resolveInside(root, "files/\0note.txt"), null);
     assert.equal(resolveInside(root, ""), null);
     assert.equal(resolveInside(root, "files/note.txt"), resolve(root, "files/note.txt"));
+  });
+
+  it("keeps html from a fictional newsletter message and drops an over-cap body", () => {
+    const html = [
+      "<table><tr><td>",
+      "<h1>Harbor Weekly</h1>",
+      "<p>The tide was quiet.</p>",
+      '<img src="https://cdn.example.com/harbor.png" alt="Harbor">',
+      '<a href="https://news.example.com/harbor">Read the week</a>',
+      "</td></tr></table>",
+    ].join("");
+    const classified = classifyIngestItem({
+      kind: "message",
+      id: "msg_harbor",
+      messageId: "<harbor@example.com>",
+      from: { name: "Harbor Weekly", email: "editor@example.com" },
+      to: [{ name: "You", email: "you@example.test" }],
+      subject: "Harbor Weekly",
+      body: "The tide was quiet. Read the week at https://news.example.com/harbor",
+      html,
+      date: "2026-10-18T12:00:00.000Z",
+    });
+    assert.equal(classified.ok, true);
+    if (!classified.ok || classified.kind !== "message") return;
+    assert.equal(classified.message.html, html);
+    assert.match(classified.message.body, /tide was quiet/);
+    assert.equal(classified.message.from.email, "editor@example.com");
+
+    assert.equal(parseHtmlBody(undefined), null);
+    assert.equal(parseHtmlBody("   "), null);
+    assert.equal(parseHtmlBody("é".repeat(Math.floor(HTML_BODY_MAX_BYTES / 2) + 1)), null);
+    const exact = "p".repeat(HTML_BODY_MAX_BYTES);
+    assert.equal(parseHtmlBody(exact), exact);
+    const over = classifyIngestItem({
+      kind: "message",
+      id: "msg_big",
+      from: "editor@example.com",
+      body: "Plain stays",
+      html: "h".repeat(HTML_BODY_MAX_BYTES + 1),
+    });
+    assert.equal(over.ok && over.kind === "message" && over.message.html, null);
+    if (over.ok && over.kind === "message") assert.equal(over.message.body, "Plain stays");
   });
 });

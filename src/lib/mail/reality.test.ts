@@ -324,6 +324,14 @@ describe("reality wiring", () => {
     assert.match(reader, /Could not read this file/);
     assert.match(reader, /Not downloaded yet/);
     assert.match(reader, /This file is ready to download/);
+    assert.match(reader, /htmlIsVisible\(message\.html\)/);
+    assert.match(reader, /<HtmlMail html=\{message\.html\} \/>/);
+    assert.match(reader, /<Body text=\{message\.body\} \/>/);
+    const htmlFrame = readFileSync(new URL("../../components/mail/html-mail.tsx", import.meta.url), "utf8");
+    assert.match(htmlFrame, /sandbox=\{HTML_FRAME_SANDBOX\}/);
+    assert.match(htmlFrame, /Show images/);
+    assert.match(htmlFrame, /text-base/);
+    assert.equal(htmlFrame.includes("allow-scripts"), false);
     assert.match(reader, /mail-inline-link wrap-anywhere inline/);
     assert.match(reader, /inline-flex min-h-11/);
     assert.equal(reader.includes("mail-inline-link inline-flex"), false);

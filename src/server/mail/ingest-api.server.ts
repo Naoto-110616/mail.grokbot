@@ -183,6 +183,7 @@ export async function upsertMessage(
     textOrNull(message.clientSendId),
     textOrNull(message.threadHint),
     message.direction ?? null,
+    message.html ?? null,
   ];
   if (keep) {
     for (const extra of ids) {
@@ -194,7 +195,7 @@ export async function upsertMessage(
       await sql.query(`update mail_attachment set message_ref = $1 where message_ref = $2`, [keep, extra]);
       await sql.query(`delete from mail_message where id = $1`, [extra]);
     }
-    // Content updates. A missing threadHint or direction keeps the stored value.
+    // Content updates. A missing threadHint, direction, or html keeps the stored value.
     // unread stays as the row already has it. Star, snooze, labels, folder, and
     // trash live on mail_thread_state and are not written here.
     await sql.query(
@@ -214,7 +215,8 @@ export async function upsertMessage(
          attachments_json = $14,
          client_send_id = $15,
          thread_hint = coalesce($16, thread_hint),
-         direction = coalesce($17, direction)
+         direction = coalesce($17, direction),
+         html_body = coalesce($18, html_body)
        where id = $1`,
       [keep, ...content, ...tail],
     );
@@ -225,11 +227,11 @@ export async function upsertMessage(
     `insert into mail_message (
        id, message_id, in_reply_to, references_json, delivered_to, account,
        from_json, to_json, cc_json, bcc_json, subject, body, date, unread,
-       attachments_json, client_send_id, thread_hint, direction
+       attachments_json, client_send_id, thread_hint, direction, html_body
      ) values (
        $1, $2, $3, $4, $5, $6,
        $7, $8, $9, $10, $11, $12, $13, $14,
-       $15, $16, $17, $18
+       $15, $16, $17, $18, $19
      )`,
     [id, ...content, unread, ...tail],
   );
@@ -379,9 +381,10 @@ export async function loadStoredIngest(sql?: Sql): Promise<IngestLoad> {
     client_send_id: string | null;
     thread_hint: string | null;
     direction: string | null;
+    html_body: string | null;
   }>(
     `select id, message_id, in_reply_to, references_json, delivered_to, account, from_json, to_json, cc_json, bcc_json,
-            subject, body, date, unread, attachments_json, client_send_id, thread_hint, direction
+            subject, body, date, unread, attachments_json, client_send_id, thread_hint, direction, html_body
      from mail_message`,
   );
   const messages: Message[] = [];
@@ -405,6 +408,7 @@ export async function loadStoredIngest(sql?: Sql): Promise<IngestLoad> {
       bcc: addressList(readJson<unknown>(row.bcc_json)),
       subject: row.subject ?? "",
       body: row.body ?? "",
+      html: typeof row.html_body === "string" && row.html_body.trim() ? row.html_body : null,
       date: typeof row.date === "string" ? row.date : new Date(0).toISOString(),
       attachments: Array.isArray(attachments)
         ? attachments.filter((file) => file && typeof file.filename === "string" && !attachmentPathUnsafe(file.path ?? ""))

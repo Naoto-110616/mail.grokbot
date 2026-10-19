@@ -16,7 +16,9 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconButton, LabelChip, Monogram, PlusChip, Sheet } from "@/components/mail/bits";
 import type { AttachmentBody } from "@/lib/mail/backend";
+import { HtmlMail } from "@/components/mail/html-mail";
 import { parseBody, quotedControlLabel, type BodyBlock, type Inline } from "@/lib/mail/body-text";
+import { htmlIsVisible } from "@/lib/mail/html-mail";
 import { initialHeaderOpenIds } from "@/lib/mail/reader-open";
 import {
   type Attachment,
@@ -229,7 +231,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
                     <MessageHeader message={message} open={open} />
                   </button>
                   <div className="min-w-0 max-w-full px-3 pb-4">
-                    <Body text={message.body} />
+                    {message.html && htmlIsVisible(message.html) ? <HtmlMail html={message.html} /> : <Body text={message.body} />}
                     {message.attachments.length > 0 && (
                       <ul className="mt-4 flex flex-col gap-2">
                         {message.attachments.map((item) => (

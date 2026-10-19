@@ -15,6 +15,7 @@ const directionMigration = readFileSync(new URL("../../../migrations/0006_mail_d
 const outboundBridgeMigration = readFileSync(new URL("../../../migrations/0008_mail_outbound_bridge.sql", import.meta.url), "utf8");
 const attachmentContentMigration = readFileSync(new URL("../../../migrations/0009_mail_attachment_content.sql", import.meta.url), "utf8");
 const mailboxConfigMigration = readFileSync(new URL("../../../migrations/0010_mail_mailbox_config.sql", import.meta.url), "utf8");
+const htmlBodyMigration = readFileSync(new URL("../../../migrations/0011_mail_html_body.sql", import.meta.url), "utf8");
 
 function wrap(pg: PGlite): Sql {
   const run = async <T>(text: string, params: unknown[]): Promise<T[]> => {
@@ -38,6 +39,7 @@ async function applyIngestSchema(pg: PGlite): Promise<void> {
   await pg.exec(outboundBridgeMigration);
   await pg.exec(attachmentContentMigration);
   await pg.exec(mailboxConfigMigration);
+  await pg.exec(htmlBodyMigration);
 }
 
 async function database(): Promise<{ sql: Sql; close: () => Promise<void> }> {
@@ -447,15 +449,16 @@ describe("ingest api", () => {
     }
   });
 
-  it("stores outbound direction and drops html", async () => {
+  it("stores outbound direction and html_body", async () => {
     const { sql, close } = await database();
     try {
+      const html = "<script>alert(1)</script><p>Hi</p>";
       const posted = await call(
         "POST",
         "/api/ingest",
         {
           items: [
-            { ...message, id: "msg_out", messageId: "<out@example.test>", direction: "Outbound", html: "<script>alert(1)</script><p>Hi</p>" },
+            { ...message, id: "msg_out", messageId: "<out@example.test>", direction: "Outbound", html },
             { ...message, id: "msg_in", messageId: "<in@example.test>", direction: "sideways", attachments: [] },
           ],
         },
@@ -463,26 +466,101 @@ describe("ingest api", () => {
         sql,
       );
       assert.deepEqual(await posted.json(), { accepted: 2, skipped: 0 });
-      const rows = await sql.query<{ id: string; direction: string | null }>(
-        `select id, direction from mail_message order by id`,
+      const rows = await sql.query<{ id: string; direction: string | null; html_body: string | null }>(
+        `select id, direction, html_body from mail_message order by id`,
       );
       assert.deepEqual(
-        rows.map((row) => [row.id, row.direction]),
+        rows.map((row) => [row.id, row.direction, row.html_body]),
         [
-          ["msg_in", null],
-          ["msg_out", "outbound"],
+          ["msg_in", null, null],
+          ["msg_out", "outbound", html],
         ],
       );
       const htmlColumn = await sql.query<{ column_name: string }>(
-        `select column_name from information_schema.columns where table_name = 'mail_message' and column_name = 'html'`,
+        `select column_name from information_schema.columns where table_name = 'mail_message' and column_name = 'html_body'`,
       );
-      assert.equal(htmlColumn.length, 0);
+      assert.equal(htmlColumn.length, 1);
       const loaded = await loadStoredIngest(sql);
       const outbound = loaded.messages.find((item) => item.id === "msg_out");
       assert.equal(outbound?.direction, "outbound");
       assert.equal(outbound?.from.email, "ada@example.test");
-      assert.equal(Object.hasOwn(outbound ?? {}, "html"), false);
-      assert.equal(loaded.messages.find((item) => item.id === "msg_in")?.direction, null);
+      assert.equal(outbound?.html, html);
+      assert.equal(loaded.messages.find((item) => item.id === "msg_in")?.html ?? null, null);
+    } finally {
+      await close();
+    }
+  });
+
+  it("updates html in place and keeps unread, star, and folder", async () => {
+    const { sql, close } = await database();
+    const first = "<p>First harbor note</p>";
+    const second = "<p>Second harbor note</p>";
+    try {
+      const inserted = await call(
+        "POST",
+        "/api/ingest",
+        { items: [{ ...message, html: first, attachments: [] }] },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.deepEqual(await inserted.json(), { accepted: 1, skipped: 0 });
+      await sql.query(`update mail_message set unread = false where id = $1`, ["msg_a"]);
+      const threadId = threadIdFromMessage({ id: "msg_a", messageId: "<a@example.test>" });
+      await sql.query(
+        `insert into mail_thread_state (
+           thread_id, location, labels_json, starred, important, unread, muted, snooze_until, category
+         ) values ($1, 'inbox', '["ops"]', true, false, false, false, '2026-11-01T00:00:00Z', 'primary')`,
+        [threadId],
+      );
+
+      const replaced = await call(
+        "POST",
+        "/api/ingest",
+        { items: [{ ...message, html: second, unread: true, body: "Updated plain", attachments: [] }] },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.deepEqual(await replaced.json(), { accepted: 1, skipped: 0 });
+      const kept = await call(
+        "POST",
+        "/api/ingest",
+        { items: [{ ...message, body: "Plain only", attachments: [] }] },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.deepEqual(await kept.json(), { accepted: 1, skipped: 0 });
+
+      const rows = await sql.query<{ unread: boolean; body: string; html_body: string | null }>(
+        `select unread, body, html_body from mail_message where id = $1`,
+        ["msg_a"],
+      );
+      assert.equal(rows[0]?.unread, false);
+      assert.equal(rows[0]?.body, "Plain only");
+      assert.equal(rows[0]?.html_body, second);
+      const state = await sql.query<{ location: string; starred: boolean; labels_json: string; snooze_until: string | null }>(
+        `select location, starred, labels_json, snooze_until from mail_thread_state where thread_id = $1`,
+        [threadId],
+      );
+      assert.equal(state[0]?.location, "inbox");
+      assert.equal(state[0]?.starred, true);
+      assert.equal(state[0]?.labels_json, '["ops"]');
+      assert.equal(state[0]?.snooze_until, "2026-11-01T00:00:00Z");
+
+      const oversized = "h".repeat(1_048_576 + 1);
+      const tooBig = await call(
+        "POST",
+        "/api/ingest",
+        { items: [{ ...message, html: oversized, body: "Still plain", attachments: [] }] },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.deepEqual(await tooBig.json(), { accepted: 1, skipped: 0 });
+      const afterCap = await sql.query<{ body: string; html_body: string | null }>(
+        `select body, html_body from mail_message where id = $1`,
+        ["msg_a"],
+      );
+      assert.equal(afterCap[0]?.body, "Still plain");
+      assert.equal(afterCap[0]?.html_body, second);
     } finally {
       await close();
     }

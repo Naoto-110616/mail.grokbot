@@ -277,6 +277,20 @@ export function withOutboundOwner(message: Message, owner: Address): Message {
   };
 }
 
+/** UTF-8 bytes of ingest `html` kept in mail_message.html_body. The 5MB request cap is separate. */
+export const HTML_BODY_MAX_BYTES = 1_048_576;
+
+/**
+ * Ingest `html` stored on the message. Blank values, non-strings, and values
+ * over HTML_BODY_MAX_BYTES are omitted so an update can keep the previous body.
+ */
+export function parseHtmlBody(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (!value.trim()) return null;
+  if (new TextEncoder().encode(value).length > HTML_BODY_MAX_BYTES) return null;
+  return value;
+}
+
 /** Empty and overlong hints are dropped so they cannot collapse unrelated mail. */
 export function parseThreadHint(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -317,6 +331,7 @@ function parseMessage(row: Record<string, unknown>, fallbackId: string): { messa
     bcc: asAddressList(row.bcc),
     subject: asString(row.subject),
     body: typeof row.body === "string" ? row.body : asString(row.text),
+    html: parseHtmlBody(row.html),
     date: asString(row.date) || new Date(0).toISOString(),
     attachments,
     delivery: null,

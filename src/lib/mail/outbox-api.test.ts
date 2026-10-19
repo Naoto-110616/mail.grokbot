@@ -34,6 +34,7 @@ const sqlFiles = [
   "0006_mail_direction.sql",
   "0008_mail_outbound_bridge.sql",
   "0010_mail_mailbox_config.sql",
+  "0011_mail_html_body.sql",
 ];
 
 function wrap(pg: PGlite): Sql {
@@ -615,6 +616,30 @@ describe("outbox api", () => {
       assert.equal(rows[0]?.id, "msg_fresh-1");
       assert.equal(rows[0]?.thread_hint, "outbox:send_fresh");
       assert.equal(rows[0]?.direction, "outbound");
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("copies html from the queued send onto the sent message", async () => {
+    const db = await database();
+    try {
+      await seed(db.sql, {
+        id: "send_html_body",
+        status: "awaiting_approval",
+        createdAt: "2026-10-02T00:00:00.000Z",
+        html: "<p>Sent <b>note</b></p>",
+      });
+      const response = await call(
+        "POST",
+        "/api/outbox/send_html_body/status",
+        { status: "sent", providerMessageId: "html-1" },
+        `Bearer ${TOKEN}`,
+        db.sql,
+      );
+      assert.equal(response.status, 200);
+      const rows = await db.sql.query<{ html_body: string | null }>(`select html_body from mail_message where id = $1`, ["msg_html-1"]);
+      assert.equal(rows[0]?.html_body, "<p>Sent <b>note</b></p>");
     } finally {
       await db.close();
     }

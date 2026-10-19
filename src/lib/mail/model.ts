@@ -49,6 +49,8 @@ export type Message = {
   bcc: Address[];
   subject: string;
   body: string;
+  /** Ingest `html`, stored in mail_message.html_body. Absent or null uses the plain body. */
+  html?: string | null;
   date: string;
   attachments: Attachment[];
   delivery?: Delivery | null;

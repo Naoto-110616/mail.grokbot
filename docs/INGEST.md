@@ -76,6 +76,7 @@ A hint only. The app does not store it and does not use it to decide which messa
   "threadHint": "batch-1",
   "direction": "inbound",
   "body": "Notes for the quarter.",
+  "html": "<p>Notes for the quarter.</p>",
   "date": "2026-10-01T15:00:00Z",
   "unread": true,
   "attachments": [
@@ -90,9 +91,15 @@ A hint only. The app does not store it and does not use it to decide which messa
 }
 ```
 
-`date` is ISO-8601. `unread` defaults to true when it is omitted, and it is stored only when the message is inserted. Posting the same `id` or `messageId` again updates the message content and leaves `unread` as it is. Omitted `threadHint` and `direction` stay as stored. Star, snooze, labels, folder, and trash live on the thread and are not changed by ingest.
+`date` is ISO-8601. `unread` defaults to true when it is omitted, and it is stored only when the message is inserted. Posting the same `id` or `messageId` again updates the message content and leaves `unread` as it is. Omitted `threadHint`, `direction`, and `html` stay as stored. Star, snooze, labels, folder, and trash live on the thread and are not changed by ingest.
 
-`direction` is `inbound` or `outbound`. Any other value is stored as empty. A missing direction is inbound unless `from` is the account address, which is outbound. Outbound mail is shown as sent by the mailbox owner and listed in Sent. `html` is not stored. Bodies stay plain text, and HTML is not a safe fragment this app can keep.
+`direction` is `inbound` or `outbound`. Any other value is stored as empty. A missing direction is inbound unless `from` is the account address, which is outbound. Outbound mail is shown as sent by the mailbox owner and listed in Sent.
+
+`html` is optional. A string is stored in `mail_message.html_body`. The plain `body` (or `text`) is always stored as well. The reader shows the HTML when `html_body` is present, and the plain body when it is not.
+
+`html` is capped at **1 MiB (1,048,576 UTF-8 bytes)** per message. The 5MB request cap is unchanged. Over the cap, the message is still accepted, the plain body is stored, and `html_body` is not written: a new row stays null, and an update keeps the HTML already stored. A blank `html` is treated the same as omitting it. A new `html` within the cap replaces `html_body`.
+
+The reader sanitizes HTML before display. Scripts, forms, and event handlers are removed. Links open in a new tab with `rel="noopener noreferrer"`. Remote images stay unloaded until the person taps Show images on that message. Tracking pixels stay unloaded after that tap.
 
 ## attachment
 

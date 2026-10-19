@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isMachineText, parseBody, plainSnippet, quotedControlLabel, type BodyBlock, type Inline, type ParsedBody } from "./body-text.ts";
+import { HTML_FRAME_SANDBOX, htmlIsVisible, mailNeedsImagePrompt, mailSrcDoc, sanitizeMailHtml } from "./html-mail.ts";
 import { initialHeaderOpenIds } from "./reader-open.ts";
 
 function linksOf(blocks: BodyBlock[]): { href: string; label: string }[] {
@@ -298,5 +299,71 @@ describe("reader rendering", () => {
     assert.match(machine, /overflow-wrap:\s*anywhere/);
     assert.match(machine, /break-word/);
     assert.match(machine, /font-size:\s*16px/);
+  });
+});
+
+describe("html mail sanitizer", () => {
+  const harbor = [
+    "<script>alert(1)</script>",
+    '<p onclick="alert(2)">Hello</p>',
+    '<a href="javascript:alert(1)">Bad</a>',
+    '<a href="&#106;avascript:alert(1)">Also bad</a>',
+    '<a href="https://news.example.com/harbor" target="_self" rel="opener">Read the week</a>',
+    '<form action="https://evil.example"><input name="a"><button type="submit">Go</button></form>',
+    '<img src="https://cdn.example.com/harbor.png" alt="Harbor" width="560" height="200">',
+    '<img src="https://track.example.com/pixel.gif" width="1" height="1" alt="">',
+  ].join("");
+
+  it("strips scripts, event handlers, javascript links, and forms", () => {
+    const out = sanitizeMailHtml(harbor, { showRemoteImages: true });
+    assert.equal(/<script/i.test(out), false);
+    assert.equal(/onclick/i.test(out), false);
+    assert.equal(/javascript:/i.test(out), false);
+    assert.equal(/<form/i.test(out), false);
+    assert.equal(/<input/i.test(out), false);
+    assert.equal(/<button/i.test(out), false);
+    assert.match(out, /Hello/);
+    assert.match(out, /Go/);
+    assert.equal(out.includes("alert"), false);
+  });
+
+  it("blocks remote images until opt-in and keeps tracking pixels blocked", () => {
+    const blocked = sanitizeMailHtml(harbor, { showRemoteImages: false });
+    assert.equal(blocked.includes("cdn.example.com"), false);
+    assert.equal(blocked.includes("pixel.gif"), false);
+    assert.match(blocked, /role="img"/);
+    assert.match(blocked, /Harbor/);
+    const shown = sanitizeMailHtml(harbor, { showRemoteImages: true });
+    assert.match(shown, /src="https:\/\/cdn\.example\.com\/harbor\.png"/);
+    assert.equal(shown.includes("pixel.gif"), false);
+    assert.equal(shown.includes("track.example.com"), false);
+    assert.equal(mailNeedsImagePrompt(harbor), true);
+    assert.equal(mailNeedsImagePrompt('<img src="https://track.example.com/pixel.gif" width="1" height="1" alt="">'), false);
+    assert.equal(mailNeedsImagePrompt("<p>Hello</p>"), false);
+  });
+
+  it("opens links in a new tab and keeps a readable theme canvas", () => {
+    const out = sanitizeMailHtml('<a href="https://news.example.com/harbor" target="_self">Read the week</a>', {
+      showRemoteImages: false,
+    });
+    assert.match(out, /href="https:\/\/news\.example\.com\/harbor"/);
+    assert.match(out, /target="_blank"/);
+    assert.match(out, /rel="noopener noreferrer"/);
+    assert.equal(out.includes("_self"), false);
+    const light = mailSrcDoc("<p>Hello</p>", { showRemoteImages: false, theme: "light" });
+    const dark = mailSrcDoc("<p>Hello</p>", { showRemoteImages: false, theme: "lights-out" });
+    assert.match(light, /TwitterChirp/);
+    assert.match(light, /background:#ffffff/);
+    assert.match(light, /color:#0f1419/);
+    assert.match(dark, /background:#000000/);
+    assert.match(dark, /color:#e7e9ea/);
+    assert.match(light, /img-src data:/);
+    assert.match(mailSrcDoc(harbor, { showRemoteImages: true, theme: "dim" }), /img-src https: http: data:/);
+    assert.match(mailSrcDoc(harbor, { showRemoteImages: true, theme: "dim" }), /background:#15202b/);
+    assert.equal(HTML_FRAME_SANDBOX.includes("allow-scripts"), false);
+    assert.equal(HTML_FRAME_SANDBOX.includes("allow-forms"), false);
+    assert.match(HTML_FRAME_SANDBOX, /allow-popups-to-escape-sandbox/);
+    assert.equal(htmlIsVisible("<script>alert(1)</script>"), false);
+    assert.equal(htmlIsVisible("<p>Hello</p>"), true);
   });
 });

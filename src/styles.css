@@ -345,6 +345,14 @@ optgroup,
   margin-block: -13px;
 }
 
+.mail-html,
+.mail-html-frame {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .mail-body img,
 .mail-body video {
   max-width: 100%;

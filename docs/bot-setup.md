@@ -132,6 +132,7 @@ When a move to `sent` is allowed and `providerMessageId` is present, the app upd
 - `bcc` is `[]`
 - `client_send_id` is the outbox id
 - `unread` is false
+- `html_body` is the queued send's `html` when that string is within 1 MiB (1,048,576 UTF-8 bytes). Compose leaves `html` null, so this is null
 
 If `reply_to_message_id` matches a `mail_message.id`, the new row copies that row's `thread_hint` and sets `in_reply_to` to that row's `message_id` (and appends it to references). The sent mail then shows in that thread and in Sent.
 
@@ -143,7 +144,7 @@ A second `sent` for the same id is `409` and does not insert another row.
 
 Posting `POST /api/ingest` later with a message whose `id` is `msg_<providerMessageId>` updates that row. It does not create a second copy. The match is the same one ingest already uses: same `id`, or the same `message_id`.
 
-On that update, an omitted `direction` stays `outbound`, and an omitted `threadHint` stays the hint written at send time. `unread` stays as stored.
+On that update, an omitted `direction` stays `outbound`, and an omitted `threadHint` stays the hint written at send time. `unread` stays as stored. An omitted `html` leaves `html_body` as stored. A new `html` within the cap replaces it. Over the cap, the previous `html_body` stays.
 
 ## `send-result` through ingest
 
@@ -198,3 +199,11 @@ The Outbox folder lists saved sends whose message is still in the mailbox. Delet
 A message attachment, or a loose `kind: "attachment"` item, may include `content`. It is standard base64 (padding required). The app decodes it and stores at most **1 MiB (1,048,576 bytes)**. The stored value is `mail_attachment.content_b64`. `attachments_json` stays metadata only: `id`, `filename`, `mime`, `bytes`, `path`.
 
 Over the cap, blank, or not valid base64: the item is still accepted, the metadata is stored, and the bytes are not. The reader then says `Not downloaded yet` and Download stays off. A later ingest of the same attachment without `content` keeps bytes already stored. With `content` under the cap, Download uses those bytes.
+
+## HTML `html` on ingest
+
+A `kind: "message"` item may include `html`. That string is the HTML body. It is stored in `mail_message.html_body`, separate from the outbox item's `html` field above (that one is the queued send, and it is copied onto the sent row only when the move to `sent` inserts the message).
+
+The cap is **1 MiB (1,048,576 UTF-8 bytes)** per message. The 5MB request cap is unchanged. Over the cap, or when `html` is omitted or blank, the message is still accepted and any `html_body` already stored stays. A new value within the cap replaces it. Re-ingesting the same `id` or `messageId` does not reset unread, star, snooze, labels, folder, or trash.
+
+The reader shows sanitized HTML when `html_body` is present, and the plain `body` otherwise. Copy `html` when the provider message has an HTML part. Leave it off when there is only plain text.
