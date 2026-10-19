@@ -1,5 +1,6 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { pingView } from "../../lib/mail/wake-retry.ts";
 import { pingWebhook, type WebhookBody } from "../../lib/mail/webhook-body.ts";
 import { webhookTarget, type MailSecrets } from "./config.server.ts";
 
@@ -64,10 +65,10 @@ export async function deliverConfigured(body: WebhookBody, root = process.cwd())
   return deliverWebhook(target, body, { outboxPath: join(root, "data", "outbox.log") });
 }
 
-/** POST `{ action: "ping" }` to the saved connection. The browser only receives the status. */
-export async function pingBot(root = process.cwd()): Promise<{ status: number | null }> {
+/** POST `{ action: "ping" }` to the saved connection. The browser receives status and a safe reason. */
+export async function pingBot(root = process.cwd()): Promise<{ status: number | null; reason: string | null }> {
   const target = await webhookTarget(root);
-  if (!target) return { status: null };
+  if (!target) return pingView({ ok: false, status: null, error: "unconfigured" });
   const result = await deliverWebhook(target, pingWebhook(), { outboxPath: join(root, "data", "outbox.log") });
-  return { status: result.status };
+  return pingView(result);
 }

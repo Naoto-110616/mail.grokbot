@@ -265,6 +265,8 @@ describe("reality wiring", () => {
     const outboundDelete = readFileSync(new URL("../../server/mail/outbound-delete.ts", import.meta.url), "utf8");
     const overlays = readFileSync(new URL("../../components/mail/overlays.tsx", import.meta.url), "utf8");
     const connection = readFileSync(new URL("./bot-connection.ts", import.meta.url), "utf8");
+    const bits = readFileSync(new URL("../../components/mail/bits.tsx", import.meta.url), "utf8");
+    const shell = readFileSync(new URL("../../components/mail/shell.tsx", import.meta.url), "utf8");
 
     assert.match(server, /mail_settings/);
     assert.match(server, /hydrateDisplaySettings/);
@@ -343,11 +345,19 @@ describe("reality wiring", () => {
     assert.match(overlays, /Send test ping/);
     assert.match(overlays, /HEADER_MODE_OPTIONS/);
     assert.match(overlays, /keySet \? "saved" : "not set"/);
+    assert.match(overlays, /flex items-center gap-2/);
+    assert.match(overlays, /const canPing = savedUrl\.trim\(\) !== ""/);
+    assert.match(overlays, /disabled=\{pending \|\| !canPing\}/);
+    assert.match(overlays, /pingFailureText/);
+    assert.match(overlays, /<Sheet title="Settings" onClose=\{\(\) => setSettingsOpen\(false\)\} wide solid>/);
     assert.match(connection, /Authorization: Bearer <key>/);
     assert.match(connection, /X-Webhook-Key: <key>/);
     assert.equal(overlays.includes("view.webhookKey"), false);
     assert.equal(/setSenderKey\(view/.test(overlays), false);
     assert.match(overlays, /text-base/);
+    assert.match(bits, /border border-line bg-paper pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] shadow-lg/);
+    assert.match(bits, /solid\?: boolean/);
+    assert.match(shell, /!\(viewing === "thread" && !desktop\) && !settingsOpen/);
 
     assert.match(compose, /autosaveCompose/);
     assert.match(compose, /700/);

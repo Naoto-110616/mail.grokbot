@@ -69,11 +69,14 @@ export function Sheet({
   onClose,
   children,
   wide,
+  solid = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** Opaque paper surface. Settings uses this so inbox text cannot show through. */
+  solid?: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
@@ -83,7 +86,10 @@ export function Sheet({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "glass rise relative z-10 max-h-[86dvh] w-full min-w-0 max-w-full overflow-auto rounded-t-3xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-3xl",
+          "rise relative z-10 max-h-[86dvh] w-full min-w-0 max-w-full overflow-auto rounded-t-3xl p-4 sm:rounded-3xl",
+          solid
+            ? "border border-line bg-paper pb-[calc(4.75rem+env(safe-area-inset-bottom))] shadow-lg"
+            : "glass pb-[max(1rem,env(safe-area-inset-bottom))]",
           wide ? "sm:w-[40rem]" : "sm:w-[28rem]",
         )}
       >

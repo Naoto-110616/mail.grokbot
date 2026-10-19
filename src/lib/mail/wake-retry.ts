@@ -30,3 +30,25 @@ export function wakeErrorText(result: { status: number | null; error: string }):
   if (result.status != null) return `HTTP ${result.status}`;
   return "Network error";
 }
+
+/** Safe ping failure reason. No URL and no key. */
+export function pingReason(error: string): string {
+  if (error === "timeout") return "Timed out";
+  if (error === "unconfigured") return "Webhook is not set";
+  if (error === "http") return "The bot returned an error";
+  return "Network error";
+}
+
+export function pingView(result: { ok: boolean; status: number | null; error?: string }): {
+  status: number | null;
+  reason: string | null;
+} {
+  if (result.ok) return { status: result.status, reason: null };
+  return { status: result.status, reason: pingReason(result.error ?? "network") };
+}
+
+/** Inline failure line: HTTP status, then the reason. */
+export function pingFailureText(view: { status: number | null; reason: string }): string {
+  const status = view.status == null ? "No response" : `HTTP ${view.status}`;
+  return `${status} — ${view.reason}`;
+}

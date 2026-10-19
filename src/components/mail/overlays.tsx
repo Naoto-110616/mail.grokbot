@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Field, Sheet, SwatchDot } from "@/components/mail/bits";
 import { HEADER_MODE_OPTIONS, type HeaderMode } from "@/lib/mail/bot-connection";
 import { fetchBotConnection, pingBotConnection, saveBotConnection } from "@/lib/mail/mail-rpc";
+import { pingFailureText } from "@/lib/mail/wake-retry";
 import { GATE_COPY, knownGateError } from "@/lib/site-gate/messages";
 import { changeSitePassword, logoutSite, sitePasswordEditable } from "@/lib/site-gate/rpc";
 import { toastLabel } from "@/lib/mail/done";
@@ -419,12 +420,14 @@ function SecuritySettings() {
 
 function BotConnection() {
   const [url, setUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState("");
   const [senderKey, setSenderKey] = useState("");
   const [headerMode, setHeaderMode] = useState<HeaderMode>("bearer");
   const [keySet, setKeySet] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [pingText, setPingText] = useState<string | null>(null);
+  const canPing = savedUrl.trim() !== "";
 
   useEffect(() => {
     let live = true;
@@ -432,6 +435,7 @@ function BotConnection() {
       .then((view) => {
         if (!live) return;
         setUrl(view.webhookUrl);
+        setSavedUrl(view.webhookUrl);
         setHeaderMode(view.headerMode);
         setKeySet(view.keySet);
       })
@@ -450,6 +454,7 @@ function BotConnection() {
     try {
       const view = await saveBotConnection({ data: { webhookUrl: url, webhookKey: senderKey, headerMode } });
       setUrl(view.webhookUrl);
+      setSavedUrl(view.webhookUrl);
       setHeaderMode(view.headerMode);
       setKeySet(view.keySet);
       setSenderKey("");
@@ -466,9 +471,15 @@ function BotConnection() {
     setPingText(null);
     try {
       const result = await pingBotConnection();
-      setPingText(result.status == null ? "No response" : `HTTP ${result.status}`);
+      setPingText(
+        result.reason
+          ? pingFailureText({ status: result.status, reason: result.reason })
+          : result.status == null
+            ? "No response"
+            : `HTTP ${result.status}`,
+      );
     } catch {
-      setPingText("No response");
+      setPingText(pingFailureText({ status: null, reason: "Network error" }));
     } finally {
       setPending(false);
     }
@@ -479,8 +490,19 @@ function BotConnection() {
       <h3 className="text-sm font-semibold">Grok Bot connection</h3>
       <form onSubmit={(event) => void onSave(event)} className="space-y-3">
         <Field label="Webhook URL" value={url} onChange={setUrl} autoComplete="off" />
-        <Field label="Sender key" type="password" value={senderKey} onChange={setSenderKey} autoComplete="off" />
-        <p className="text-base text-muted">{keySet ? "saved" : "not set"}</p>
+        <label className="block text-sm">
+          <span className="mb-1 block text-xs font-medium text-muted">Sender key</span>
+          <span className="flex items-center gap-2">
+            <input
+              type="password"
+              value={senderKey}
+              autoComplete="off"
+              onChange={(event) => setSenderKey(event.target.value)}
+              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-paper-2 px-3 text-base text-ink outline-none"
+            />
+            <span className="shrink-0 text-base text-muted">{keySet ? "saved" : "not set"}</span>
+          </span>
+        </label>
         <label className="block text-sm">
           <span className="mb-1 block text-xs font-medium text-muted">Auth header</span>
           <select
@@ -505,15 +527,19 @@ function BotConnection() {
           </button>
           <button
             type="button"
-            disabled={pending}
+            disabled={pending || !canPing}
             onClick={() => void onPing()}
             className="h-11 rounded-full bg-ink/5 px-4 text-base font-semibold disabled:opacity-40"
           >
             Send test ping
           </button>
         </div>
+        {pingText ? (
+          <p role="status" className="text-base text-ink">
+            {pingText}
+          </p>
+        ) : null}
       </form>
-      {pingText ? <p className="text-base">{pingText}</p> : null}
       {notice ? <p className="text-base text-muted">{notice}</p> : null}
     </section>
   );
@@ -540,7 +566,7 @@ function Settings() {
   const [markRead, setMarkRead] = useState(true);
 
   return (
-    <Sheet title="Settings" onClose={() => setSettingsOpen(false)} wide>
+    <Sheet title="Settings" onClose={() => setSettingsOpen(false)} wide solid>
       <div className="space-y-8 pb-4">
         <section className="space-y-3">
           <h3 className="text-sm font-semibold">Profile</h3>

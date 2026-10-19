@@ -36,7 +36,7 @@ export const saveBotConnection = createServerFn({ method: "POST" })
     return save(data);
   });
 
-export const pingBotConnection = createServerFn({ method: "POST" }).handler(async (): Promise<{ status: number | null }> => {
+export const pingBotConnection = createServerFn({ method: "POST" }).handler(async (): Promise<{ status: number | null; reason: string | null }> => {
   const { pingBot } = await import("@/server/mail/bridge.server");
   return pingBot();
 });

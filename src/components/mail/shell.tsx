@@ -80,6 +80,7 @@ export function MailShell({
   const openCompose = useMail((s) => s.openCompose);
   const setPalette = useMail((s) => s.setPalette);
   const dismissToast = useMail((s) => s.dismissToast);
+  const settingsOpen = useMail((s) => s.settingsOpen);
 
   const showDone = useMail((s) => s.showDone);
   const rows = visibleThreads({ threads, folder, category, query, now, aliases, labels, account, showDone });
@@ -390,7 +391,7 @@ export function MailShell({
         {showReader && <Reader split={split} onBack={() => useMail.getState().backToList()} />}
       </div>
 
-      {!(viewing === "thread" && !desktop) && (
+      {!(viewing === "thread" && !desktop) && !settingsOpen && (
         <nav
           className="glass safe-bottom fixed bottom-2 left-[max(0.5rem,env(safe-area-inset-left))] right-[max(0.5rem,env(safe-area-inset-right))] z-30 flex min-w-0 max-w-full items-end justify-around overflow-hidden rounded-full px-1 pt-1 lg:hidden"
           aria-label={checked.length > 0 ? "Batch" : "Primary"}

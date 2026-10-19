@@ -9,7 +9,7 @@ import { toBotConnectionView } from "./bot-connection.ts";
 import { deliverWebhook } from "../../server/mail/bridge.server.ts";
 import { parseConfig, toPublicConfig } from "../../server/mail/config.server.ts";
 import { pingWebhook, sendWake } from "./webhook-body.ts";
-import { WAKE_ATTEMPT_DELAYS_MS, planAfterFailure, wakeErrorText } from "./wake-retry.ts";
+import { WAKE_ATTEMPT_DELAYS_MS, pingFailureText, pingView, planAfterFailure, wakeErrorText } from "./wake-retry.ts";
 
 const SENDER_KEY = "sender-key-example";
 
@@ -201,5 +201,22 @@ describe("webhook bridge", () => {
     assert.equal(wakeErrorText({ status: null, error: "timeout" }), "Timed out");
     assert.equal(wakeErrorText({ status: null, error: "network" }), "Network error");
     assert.equal(wakeErrorText({ status: null, error: "unconfigured" }), "Webhook is not set");
+  });
+
+  it("shows a failed ping as status and reason, with no key", () => {
+    const failed = pingView({ ok: false, status: 503, error: "http" });
+    assert.deepEqual(failed, { status: 503, reason: "The bot returned an error" });
+    assert.equal(pingFailureText({ status: failed.status, reason: failed.reason ?? "" }), "HTTP 503 — The bot returned an error");
+    const timedOut = pingView({ ok: false, status: null, error: "timeout" });
+    assert.equal(pingFailureText({ status: timedOut.status, reason: timedOut.reason ?? "" }), "No response — Timed out");
+    assert.deepEqual(pingView({ ok: false, status: null, error: "network" }), { status: null, reason: "Network error" });
+    assert.deepEqual(pingView({ ok: false, status: null, error: "unconfigured" }), {
+      status: null,
+      reason: "Webhook is not set",
+    });
+    assert.deepEqual(pingView({ ok: true, status: 200 }), { status: 200, reason: null });
+    const line = pingFailureText({ status: 503, reason: "The bot returned an error" });
+    assert.equal(line.includes(SENDER_KEY), false);
+    assert.equal(line.includes("example.com"), false);
   });
 });
