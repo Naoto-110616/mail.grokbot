@@ -1,0 +1,13 @@
+{
+  "kind": "message",
+  "id": "msg_d",
+  "messageId": "<d@example.test>",
+  "deliveredTo": "you+books@example.test",
+  "account": "primary",
+  "from": { "name": "Dee", "email": "dee@example.test" },
+  "to": [{ "name": "You", "email": "you+books@example.test" }],
+  "subject": "Re: Quarterly notes",
+  "body": "Subject fallback should join the header thread.",
+  "date": "2026-10-03T12:00:00Z",
+  "unread": false
+}

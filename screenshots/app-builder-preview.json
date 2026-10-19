@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "(6) Grokbot Mail",
+      "hasCanvas": false,
+      "bodyTextLen": 2021,
+      "bodyTextHash": "4d32797c381601b10e67a6a23ed8ffabbef29eab9a373bddfbb585e8445b4c8a",
+      "bodyTextPrefix": "Commands ⌘K grokbot mail you@example.test Compose Inbox 6 St",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "(6) Grokbot Mail",
+      "hasCanvas": false,
+      "bodyTextLen": 1684,
+      "bodyTextHash": "3d6163bf9ea8cdff7d2f0760a0fbdf75d641b4361e50914d88277f78afffbffd",
+      "bodyTextPrefix": "Inbox 5 conversations Primary3 Social1 Updates1 Promos1 M Maren ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

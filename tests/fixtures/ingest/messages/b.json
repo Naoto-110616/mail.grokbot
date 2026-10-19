@@ -1,0 +1,17 @@
+{
+  "kind": "message",
+  "id": "msg_b",
+  "messageId": "<b@example.test>",
+  "inReplyTo": "<a@example.test>",
+  "references": ["<a@example.test>"],
+  "deliveredTo": "You <you+ops@example.test>",
+  "account": "primary",
+  "from": { "name": "Bea", "email": "bea@example.test" },
+  "to": [{ "name": "You", "email": "you+ops@example.test" }],
+  "cc": [],
+  "bcc": [],
+  "subject": "Different subject",
+  "body": "Replying with headers.",
+  "date": "2026-10-01T16:00:00Z",
+  "unread": true
+}

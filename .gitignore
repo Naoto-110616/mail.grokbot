@@ -1,0 +1,13 @@
+node_modules/
+# Licensed Chirp (TwitterChirp). Do not commit font files.
+/public/fonts/
+.project_id
+.github_repo
+.env
+.env.*
+.vercel/output
+data/config.json
+data/outbox.log
+data/ingest/**
+!data/ingest/fixtures/
+!data/ingest/fixtures/**

@@ -1,0 +1,20 @@
+{
+  "kind": "message",
+  "id": "msg_a",
+  "messageId": "<a@example.test>",
+  "inReplyTo": null,
+  "references": [],
+  "deliveredTo": "you+ops@example.test",
+  "account": "primary",
+  "from": { "name": "Ada", "email": "ada@example.test" },
+  "to": [{ "name": "You", "email": "you+ops@example.test" }],
+  "cc": [],
+  "bcc": [],
+  "subject": "Quarterly notes",
+  "body": "Notes for the quarter.",
+  "date": "2026-10-01T15:00:00Z",
+  "unread": true,
+  "attachments": [
+    { "id": "att_note", "filename": "note.txt", "mime": "text/plain", "bytes": 11, "path": "files/note.txt" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "send-result",
+  "clientSendId": "send_1",
+  "status": "sent",
+  "replyToMessageId": "<a@example.test>",
+  "sentMessageId": "<sent-1@example.test>",
+  "error": null
+}

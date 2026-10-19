@@ -1,0 +1,9 @@
+{
+  "kind": "attachment",
+  "id": "att_note",
+  "messageId": "<a@example.test>",
+  "filename": "note.txt",
+  "mime": "text/plain",
+  "bytes": 11,
+  "path": "files/note.txt"
+}

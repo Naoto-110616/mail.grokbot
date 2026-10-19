@@ -1,0 +1,10 @@
+{
+  "kind": "account",
+  "address": "you@example.test",
+  "displayName": "You",
+  "aliases": [
+    { "email": "you@example.test", "tag": null, "name": "You" },
+    { "email": "you+ops@example.test", "tag": "ops", "name": "Ops" },
+    { "email": "you+books@example.test", "tag": "books", "name": "Books" }
+  ]
+}

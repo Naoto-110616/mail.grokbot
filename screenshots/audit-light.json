@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "(6) Grokbot Mail",
+      "hasCanvas": false,
+      "bodyTextLen": 2354,
+      "bodyTextHash": "b1201cf8c7b18e3af89f1d4674c88e5fed2a99e59a5c50af853530c5b0639263",
+      "bodyTextPrefix": "Commands ⌘K grokbot mail you@ you@example.test Add Gmail Com",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/audit-light.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "(6) Grokbot Mail",
+      "hasCanvas": false,
+      "bodyTextLen": 2002,
+      "bodyTextHash": "14cc993fafaf0c77745616282bb785ccaf5a2dbbdc73249d33f18084e153f533",
+      "bodyTextPrefix": "Inbox 5 conversations Primary3 Social1 Updates1 Promos1 M Maren ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/audit-light-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/audit-light.json"
+}

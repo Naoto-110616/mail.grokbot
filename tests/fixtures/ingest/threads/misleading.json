@@ -1,0 +1,5 @@
+{
+  "kind": "thread",
+  "id": "thr_wrong",
+  "messageIds": ["<c@example.test>", "<a@example.test>"]
+}

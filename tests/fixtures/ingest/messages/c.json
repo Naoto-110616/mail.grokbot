@@ -1,0 +1,13 @@
+{
+  "kind": "message",
+  "id": "msg_c",
+  "messageId": "<c@example.test>",
+  "deliveredTo": "you@example.test",
+  "account": "primary",
+  "from": { "name": "Cy", "email": "cy@example.test" },
+  "to": [{ "name": "You", "email": "you@example.test" }],
+  "subject": "Quarterly notes",
+  "body": "Same subject, new conversation.",
+  "date": "2026-10-02T12:00:00Z",
+  "unread": true
+}

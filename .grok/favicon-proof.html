@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;background:#c8c4bb;}
+  .row{display:flex;align-items:flex-end;gap:28px;padding:24px;}
+  figure{margin:0;text-align:center;font:12px/1.2 ui-sans-serif,sans-serif;color:#16181d;}
+  img{display:block;background:
+    linear-gradient(45deg,#bbb 25%,transparent 25%),
+    linear-gradient(-45deg,#bbb 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#bbb 75%),
+    linear-gradient(-45deg,transparent 75%,#bbb 75%);
+    background-size:8px 8px;background-position:0 0,0 4px,4px -4px,-4px 0;background-color:#ddd;}
+  .n16{width:16px;height:16px;}
+  .pix{width:128px;height:128px;image-rendering:pixelated;}
+  .n32{width:32px;height:32px;}
+  .n64{width:64px;height:64px;}
+</style>
+<div class="row">
+  <figure><img class="n16" src="favicon.svg" alt=""><figcaption>16</figcaption></figure>
+  <figure><img class="pix" src="favicon.svg" alt=""><figcaption>16 nearest x8</figcaption></figure>
+  <figure><img class="n32" src="favicon.svg" alt=""><figcaption>32</figcaption></figure>
+  <figure><img class="n64" src="favicon.svg" alt=""><figcaption>64</figcaption></figure>
+</div>
