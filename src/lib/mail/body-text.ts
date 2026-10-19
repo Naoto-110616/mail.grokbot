@@ -36,11 +36,12 @@ export function quotedControlLabel(
 
 /**
  * One line of machine text: a long unbroken token, SQL, JSON, or a key:value log line.
- * A long URL inside a sentence stays prose so it can still be a short link.
+ * A URL is never machine text. A bare tracking URL stays a short link, and a URL inside a sentence stays prose.
  */
 export function isMachineText(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed) return false;
+  if (/^https?:\/\//i.test(trimmed)) return false;
   return isJsonLine(trimmed) || isSqlLine(trimmed) || isLogLine(trimmed) || isLongTokenLine(trimmed) || jsonStartDepth(trimmed) > 0;
 }
 
@@ -295,8 +296,9 @@ function isLogLine(line: string): boolean {
 }
 
 function isLongTokenLine(line: string): boolean {
-  if (!new RegExp(`\\S{${LONG_TOKEN},}`).test(line)) return false;
-  const without = line.replace(new RegExp(`\\S{${LONG_TOKEN},}`, "g"), " ").replace(/[()[\]<>]/g, " ");
+  const withoutUrls = line.replace(/https?:\/\/\S+/gi, " ");
+  if (!new RegExp(`\\S{${LONG_TOKEN},}`).test(withoutUrls)) return false;
+  const without = withoutUrls.replace(new RegExp(`\\S{${LONG_TOKEN},}`, "g"), " ").replace(/[()[\]<>]/g, " ");
   const words = without.split(/\s+/).filter((word) => /[A-Za-z]{4,}/.test(word));
   return words.length === 0;
 }

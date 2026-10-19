@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { createElement, Fragment } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { isMachineText, parseBody, plainSnippet, quotedControlLabel, type BodyBlock, type Inline, type ParsedBody } from "./body-text.ts";
+import { initialHeaderOpenIds } from "./reader-open.ts";
 
 function linksOf(blocks: BodyBlock[]): { href: string; label: string }[] {
   const found: { href: string; label: string }[] = [];
@@ -173,7 +174,7 @@ describe("message body text", () => {
 
   it("detects machine text and groups each run into one wrapped block", () => {
     const long = `https://track.example.com/alerts/disk?host=web-1.example.com&token=${"a".repeat(40)}`;
-    assert.equal(isMachineText(long), true);
+    assert.equal(isMachineText(long), false);
     assert.equal(isMachineText(`Read the notes at ${long} please.`), false);
     assert.equal(isMachineText("select id, body from mail_message where id = 'm'"), true);
     assert.equal(isMachineText("Note: please review the attached notes today."), false);
@@ -198,17 +199,61 @@ describe("message body text", () => {
       ].join("\n"),
     );
     const machines = parsed.blocks.filter((block) => block.kind === "machine");
-    assert.equal(machines.length, 3);
-    assert.equal(machines[0]?.kind === "machine" ? machines[0].text : "", long);
-    assert.match(machines[1]?.kind === "machine" ? machines[1].text : "", /"alert": "disk"/);
-    assert.match(machines[1]?.kind === "machine" ? machines[1].text : "", /"host": "web-1.example.com"/);
-    assert.match(machines[2]?.kind === "machine" ? machines[2].text : "", /attempt: 3/);
+    assert.equal(machines.length, 2);
+    assert.equal(
+      machines.every((block) => block.kind === "machine" && !/^https?:\/\//i.test(block.text) && !block.text.includes("https://")),
+      true,
+    );
+    assert.match(machines[0]?.kind === "machine" ? machines[0].text : "", /"alert": "disk"/);
+    assert.match(machines[0]?.kind === "machine" ? machines[0].text : "", /"host": "web-1.example.com"/);
+    assert.match(machines[1]?.kind === "machine" ? machines[1].text : "", /attempt: 3/);
     assert.equal(parsed.blocks[0]?.kind, "p");
     assert.equal(parsed.blocks.at(-1)?.kind, "p");
-    assert.equal(plain(parsed.blocks).includes(long), true);
+    const link = linksOf(parsed.blocks).find((item) => item.href === long);
+    assert.equal(link?.label, "track.example.com");
+    assert.equal(plain(parsed.blocks).includes(long), false);
+    assert.match(plain(parsed.blocks), /track\.example\.com/);
     const sql = parseBody("select id, body\nfrom mail_message\nwhere id = 'msg_1'");
     assert.equal(sql.blocks.length, 1);
     assert.equal(sql.blocks[0]?.kind, "machine");
+  });
+
+  it("hides the quoted-text control on an alert that has no quote", () => {
+    const long = `https://track.example.com/alerts/disk?host=web-1.example.com&token=${"a".repeat(80)}`;
+    const alert = [
+      "Disk almost full on web-1.",
+      "The checker could not file this payload.",
+      "The volume crossed the threshold overnight and the queue is still growing.",
+      "",
+      "Open the run if you need the raw trace.",
+      "",
+      long,
+      "",
+      "{",
+      '  "alert": "disk",',
+      '  "host": "web-1.example.com",',
+      '  "path": "/var/lib/mail",',
+      '  "freeBytes": 1048576',
+      "}",
+      "",
+      "host: web-1.example.com",
+      "status: failed",
+      "attempt: 3",
+      "path: /var/lib/mail/queue",
+      "",
+      "Please file this before the volume fills.",
+    ].join("\n");
+    const parsed = parseBody(alert);
+    assert.equal(parsed.hidden, null);
+    assert.equal(quotedControlLabel(parsed.hidden, false), null);
+    assert.equal(
+      parsed.blocks.some((block) => block.kind === "machine" && block.text.includes("https://")),
+      false,
+    );
+    assert.equal(linksOf(parsed.blocks).some((link) => link.label === "track.example.com" && link.href === long), true);
+    const quoted = parseBody(`${alert}\n\nOn Tue, Oct 13, 2026, Ada wrote:\n> The disk was fine yesterday.`);
+    assert.ok(quoted.hidden?.length);
+    assert.equal(quotedControlLabel(quoted.hidden, false), "Show quoted text");
   });
 
   it("names the quoted-text control and hides it when nothing is hidden", () => {
@@ -234,6 +279,13 @@ describe("reader rendering", () => {
     assert.equal(reader.includes("Show trimmed content"), false);
     assert.equal(reader.includes("…"), false);
     assert.match(reader, /useState<string\[\]>\(\[\]\)/);
+    assert.match(reader, /initialHeaderOpenIds\(/);
+    const bodyAt = reader.indexOf("<Body text={message.body} />");
+    assert.ok(bodyAt > 0);
+    assert.equal(reader.slice(bodyAt - 220, bodyAt).includes("{open &&"), false);
+    assert.deepEqual(initialHeaderOpenIds([]), []);
+    assert.deepEqual(initialHeaderOpenIds(["only"]), []);
+    assert.deepEqual(initialHeaderOpenIds(["older", "latest"]), ["latest"]);
     assert.equal(reader.includes("plainSnippet"), false);
     assert.match(reader, /text-\[17px\]/);
     assert.match(reader, /leading-\[1\.5\]/);

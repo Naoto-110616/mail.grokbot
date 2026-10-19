@@ -5,7 +5,8 @@ import { demoFromAddress, demoMine, plusFallback } from "@/lib/mail/adapters/loc
 import type { AttachmentBody, BackendId, SendRequest } from "@/lib/mail/backend";
 import { fetchPublicMailConfig, retryOutboxSend } from "@/lib/mail/mail-rpc";
 import { needsBulkConfirm } from "@/lib/mail/batch";
-import { applySenderRules, upsertSenderRule } from "@/lib/mail/bundles";
+import { upsertSenderRule } from "@/lib/mail/bundles";
+import { applyInboxCategories } from "@/lib/mail/category";
 import { acceptStoredSenders, applyGate, blockDomain, decideSenders as decideSenderBook, gateBookOf, migrateSavedGate, type GateMode } from "@/lib/mail/gate";
 import { buildQuickRequest, quickRepliesOf } from "@/lib/mail/quick";
 import { recentSearchesOf, savedSearchesOf } from "@/lib/mail/search";
@@ -852,7 +853,7 @@ export const useMail = create<State>()(
           const senderRules = upsertSenderRule(before.settings.senderRules, key, category);
           set({
             settings: { ...before.settings, senderRules },
-            threads: applySenderRules(before.threads, senderRules),
+            threads: applyInboxCategories(before.threads, senderRules),
             toast: pushUndo(before.toast, "Sender filed", snapshot, before.settings.undoSeconds * 1000),
           });
           void persistProduct();

@@ -1,5 +1,6 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { classifyThread } from "../../lib/mail/category.ts";
 import { attachmentContentBase64, type Address, type Alias, type Attachment, type Message, type Thread } from "../../lib/mail/model.ts";
 import { groupByHeaders, normalizeMessageId, threadPlusTag } from "../../lib/mail/threading.ts";
 
@@ -166,7 +167,7 @@ export function threadsFromMessages(messages: Message[], unread = new Map<string
     const root = group[0];
     if (!root) continue;
     const shown = group.map((message) => presentMessage(message, accountAddress));
-    threads.push({
+    const built: Thread = {
       id: threadIdFromMessage(root),
       subject: root.subject || "(no subject)",
       category: "primary",
@@ -182,7 +183,8 @@ export function threadsFromMessages(messages: Message[], unread = new Map<string
       messages: shown,
       draft: null,
       account: "grokbot",
-    });
+    };
+    threads.push({ ...built, category: classifyThread(built) });
   }
   threads.sort((a, b) => {
     const aDate = Date.parse(a.messages[a.messages.length - 1]?.date ?? "") || 0;

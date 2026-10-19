@@ -25,7 +25,7 @@ import {
   uid,
   withSignature,
 } from "@/lib/mail/model";
-import { applySenderRules } from "@/lib/mail/bundles";
+import { applyInboxCategories } from "@/lib/mail/category";
 import { reopenDoneThread } from "@/lib/mail/done";
 import { canonicalOutboxStatus, outboxItemsForThreads, type OutboxItem } from "@/lib/mail/outbox";
 import { deleteOutboundForMailbox } from "./outbound-delete.ts";
@@ -437,7 +437,7 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
       }
     : prefs;
   if (overlay && !overlay.settingsPresent) await writeSettings(settings);
-  threads = applySenderRules(threads, settings.senderRules);
+  threads = applyInboxCategories(threads, settings.senderRules);
   return {
     threads,
     labels: overlay?.labels ?? current?.labels ?? [],

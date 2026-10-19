@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconButton, LabelChip, Monogram, PlusChip, Sheet } from "@/components/mail/bits";
 import type { AttachmentBody } from "@/lib/mail/backend";
 import { parseBody, quotedControlLabel, type BodyBlock, type Inline } from "@/lib/mail/body-text";
+import { initialHeaderOpenIds } from "@/lib/mail/reader-open";
 import {
   type Attachment,
   type Message,
@@ -50,7 +51,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   const [chipsOpen, setChipsOpen] = useState(false);
   const focusMessageId = useMail((s) => s.focusMessageId);
   const [menu, setMenu] = useState(false);
-  // Empty: every message starts collapsed to the sender and time.
+  // Header details only. Bodies stay visible. A single message starts collapsed; a thread opens the latest header.
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [file, setFile] = useState<Attachment | null>(null);
   const [fileBody, setFileBody] = useState<AttachmentBody | null>(null);
@@ -60,14 +61,15 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
 
   const threadId = thread?.id;
   const lastMessageId = thread?.messages[thread.messages.length - 1]?.id;
+  const headerKey = thread?.messages.map((message) => message.id).join("\n") ?? "";
   const focused =
     focusMessageId && thread?.messages.some((message) => message.id === focusMessageId) ? focusMessageId : null;
   useEffect(() => {
-    setOpenIds([]);
+    setOpenIds(initialHeaderOpenIds(headerKey ? headerKey.split("\n") : []));
     setMenu(false);
     setReplyAll(false);
     setChipsOpen(false);
-  }, [threadId, lastMessageId, focused]);
+  }, [threadId, lastMessageId, focused, headerKey]);
   useEffect(() => {
     focusRef.current?.scrollIntoView({ block: "nearest" });
   }, [threadId, focused]);
@@ -226,28 +228,26 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
                   >
                     <MessageHeader message={message} open={open} />
                   </button>
-                  {open && (
-                    <div className="min-w-0 max-w-full px-3 pb-4">
-                      <Body text={message.body} />
-                      {message.attachments.length > 0 && (
-                        <ul className="mt-4 flex flex-col gap-2">
-                          {message.attachments.map((item) => (
-                            <li key={item.id}>
-                              <button
-                                type="button"
-                                onClick={() => setFile(item)}
-                                className="flex h-12 w-full items-center gap-3 rounded-xl border border-line px-3 text-left text-sm hover:bg-ink/5"
-                              >
-                                <Paperclip className="size-4 shrink-0 text-muted" />
-                                <span className="min-w-0 flex-1 truncate">{item.filename}</span>
-                                <span className="text-xs text-muted tabular-nums">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
+                  <div className="min-w-0 max-w-full px-3 pb-4">
+                    <Body text={message.body} />
+                    {message.attachments.length > 0 && (
+                      <ul className="mt-4 flex flex-col gap-2">
+                        {message.attachments.map((item) => (
+                          <li key={item.id}>
+                            <button
+                              type="button"
+                              onClick={() => setFile(item)}
+                              className="flex h-12 w-full items-center gap-3 rounded-xl border border-line px-3 text-left text-sm hover:bg-ink/5"
+                            >
+                              <Paperclip className="size-4 shrink-0 text-muted" />
+                              <span className="min-w-0 flex-1 truncate">{item.filename}</span>
+                              <span className="text-xs text-muted tabular-nums">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </article>
               );
             })}

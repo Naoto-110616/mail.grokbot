@@ -1,4 +1,4 @@
-import { applySenderRules } from "./bundles.ts";
+import { applyInboxCategories } from "./category.ts";
 import { applyGate } from "./gate.ts";
 import { hydrateDisplaySettings, keepLocalSettings, type MailData } from "./model.ts";
 
@@ -13,7 +13,7 @@ export function applyBackendData(
       ? hydrateDisplaySettings(incoming.settings, current.settings)
       : keepLocalSettings(current.settings, incoming.settings);
   const aliases = incoming.aliases?.length ? incoming.aliases : current.aliases;
-  const ruled = applySenderRules(incoming.threads, settings.senderRules);
+  const ruled = applyInboxCategories(incoming.threads, settings.senderRules);
   const gated = applyGate(ruled, settings.gate, aliases);
   return {
     ...incoming,

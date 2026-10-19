@@ -282,7 +282,7 @@ describe("reality wiring", () => {
     assert.equal(server.includes("not sent"), false);
     assert.match(server, /linkedThreadState/);
     assert.match(server, /applyFilters/);
-    assert.match(server, /applySenderRules/);
+    assert.match(server, /applyInboxCategories/);
     assert.match(server, /deleteOutboundForMailbox/);
     assert.match(server, /outboxItemsForThreads/);
     assert.match(outboundDelete, /delete from mail_outbound where thread_id = \$1/);
@@ -330,6 +330,16 @@ describe("reality wiring", () => {
     assert.match(css, /\.mail-inline-link \{[^}]*padding-block: 13px;/);
     assert.match(css, /\.mail-inline-link \{[^}]*margin-block: -13px;/);
 
+    const headerStart = list.indexOf('<header className="flex min-w-0 max-w-full items-center gap-1 border-b');
+    const headerEnd = list.indexOf("</header>", headerStart);
+    const header = list.slice(headerStart, headerEnd);
+    assert.ok(header.includes("folderLabel(folder, labels)"));
+    assert.equal(header.includes("Show done"), false);
+    assert.ok(header.indexOf("folderLabel(folder, labels)") < header.indexOf("setSelecting(true)"));
+    assert.match(list, /visibleCategoryTabs/);
+    assert.match(list, /unreadBadgeLabel/);
+    assert.match(list, /pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] lg:pb-2/);
+    assert.equal(list.includes("pb-24"), false);
     assert.match(list, /aria-label="Done"/);
     assert.match(list, /inline-flex size-11 shrink-0 items-center justify-center rounded-full text-accent/);
     assert.equal(list.includes("lg:group-hover:inline-flex"), false);
@@ -355,6 +365,9 @@ describe("reality wiring", () => {
     assert.equal(overlays.includes("view.webhookKey"), false);
     assert.equal(/setSenderKey\(view/.test(overlays), false);
     assert.match(overlays, /text-base/);
+    assert.match(overlays, /role="radiogroup"/);
+    assert.match(overlays, /role="radio"/);
+    assert.match(overlays, /aria-checked=\{value === id\}/);
     assert.match(bits, /border border-line bg-paper pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] shadow-lg/);
     assert.match(bits, /solid\?: boolean/);
     assert.match(shell, /!\(viewing === "thread" && !desktop\) && !settingsOpen/);

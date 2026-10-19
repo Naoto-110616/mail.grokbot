@@ -907,16 +907,18 @@ function Segment({
   return (
     <div>
       <p className="mb-1 text-xs font-medium text-muted">{label}</p>
-      <div className="flex rounded-full bg-ink/5 p-1">
+      <div role="radiogroup" aria-label={label} className="flex rounded-full bg-ink/5 p-1">
         {options.map(([id, name]) => (
           <button
             key={id}
             type="button"
+            role="radio"
+            aria-checked={value === id}
             onClick={() => onChange(id)}
             className={
               value === id
-                ? "h-9 flex-1 rounded-full bg-paper-2 text-xs font-semibold shadow-border"
-                : "h-9 flex-1 rounded-full text-xs font-medium text-muted"
+                ? "h-11 min-w-0 flex-1 rounded-full bg-paper-2 px-2 text-base font-semibold shadow-border"
+                : "h-11 min-w-0 flex-1 rounded-full px-2 text-base font-medium text-muted"
             }
           >
             {name}
