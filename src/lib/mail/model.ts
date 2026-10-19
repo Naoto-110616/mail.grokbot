@@ -12,7 +12,7 @@ import {
   type SavedSearch,
 } from "./search.ts";
 import type { OutboxItem } from "./outbox.ts";
-import { defaultSwipePrefs, type SwipePrefs } from "./swipe.ts";
+import { defaultSwipePrefs, swipePrefsOf, type SwipePrefs } from "./swipe.ts";
 
 /** Placeholder address until an ingest account or config.json sets one. */
 export const DEMO_ADDRESS = "you@example.test";
@@ -287,6 +287,44 @@ export function keepLocalSettings(current: Settings, incoming: Settings): Settin
   };
 }
 
+const DENSITIES = new Set<Settings["density"]>(["comfortable", "cozy", "compact"]);
+const THEMES = new Set<ThemeName>(["light", "dim", "lights-out", "system"]);
+const PANES = new Set<Settings["pane"]>(["right", "none"]);
+
+/** One stored settings document. Null when the row is missing or not an object. */
+export function settingsFromUnknown(value: unknown): Settings | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const base = defaultSettings();
+  const density = DENSITIES.has(row.density as Settings["density"]) ? (row.density as Settings["density"]) : base.density;
+  let theme = THEMES.has(row.theme as ThemeName) ? (row.theme as ThemeName) : base.theme;
+  if (row.theme === "dark") theme = "lights-out";
+  const pane = PANES.has(row.pane as Settings["pane"]) ? (row.pane as Settings["pane"]) : base.pane;
+  const glass =
+    typeof row.glass === "number" && Number.isFinite(row.glass) ? Math.min(100, Math.max(0, Math.round(row.glass))) : base.glass;
+  const undoSeconds =
+    typeof row.undoSeconds === "number" && Number.isFinite(row.undoSeconds) ? row.undoSeconds : base.undoSeconds;
+  const swipe = row.swipePrefs && typeof row.swipePrefs === "object" ? (row.swipePrefs as Partial<SwipePrefs>) : null;
+  return {
+    displayName: typeof row.displayName === "string" ? row.displayName : base.displayName,
+    signature: typeof row.signature === "string" ? row.signature : base.signature,
+    density,
+    theme,
+    glass,
+    undoSeconds,
+    pane,
+    defaultFrom: typeof row.defaultFrom === "string" && row.defaultFrom.includes("@") ? row.defaultFrom : base.defaultFrom,
+    vacationOn: row.vacationOn === true,
+    vacationText: typeof row.vacationText === "string" ? row.vacationText : base.vacationText,
+    swipePrefs: swipePrefsOf(swipe),
+    senderRules: senderRulesOf(row.senderRules),
+    gate: gateBookOf(row.gate),
+    quickReplies: quickRepliesOf(row.quickReplies),
+    savedSearches: savedSearchesOf(row.savedSearches),
+    recentSearches: recentSearchesOf(row.recentSearches),
+  };
+}
+
 export function mineSet(aliases: Alias[]): Set<string> {
   return new Set(aliases.map((a) => a.email.toLowerCase()));
 }
@@ -336,6 +374,12 @@ export function activityIso(t: Thread): string {
 
 export const WAITING_COPY = "Waiting for approval in Grok Bot";
 export { QUEUED_TOAST, OUTBOX_WAITING } from "./outbox.ts";
+
+/** Wake POST failed. New mail and forwards say "message"; only a reply says "reply". */
+export function wakeMissNotice(mode: DraftMode): string {
+  const noun = mode === "reply" || mode === "replyAll" ? "reply" : "message";
+  return `Grok Bot did not wake. This ${noun} was not sent.`;
+}
 
 export function snippetOf(t: Thread): string {
   const last = [...t.messages].reverse()[0];
@@ -813,6 +857,94 @@ export function withSignature(body: string, signature: string): string {
   return `${body.replace(/\s*$/, "")}\n\n--\n${sig}`;
 }
 
+const SIGNATURE_MARK = /^(?:--|—|–)\s*$/;
+
+/** Body text that is not a trailing signature or a lone `--` line. */
+export function bodyBeyondSignature(body: string, signature: string): string {
+  const sigLines = signature.trim()
+    ? signature.replace(/\r\n/g, "\n").trim().split("\n").map((line) => line.trim())
+    : [];
+  let lines = body.replace(/\r\n/g, "\n").split("\n");
+  const trimEnd = () => {
+    while (lines.length > 0 && lines[lines.length - 1]?.trim() === "") lines.pop();
+  };
+  for (let guard = 0; guard < 6; guard += 1) {
+    trimEnd();
+    if (lines.length === 0) break;
+    const last = lines[lines.length - 1]?.trim() ?? "";
+    if (SIGNATURE_MARK.test(last)) {
+      lines.pop();
+      continue;
+    }
+    if (sigLines.length > 0 && lines.length >= sigLines.length) {
+      const start = lines.length - sigLines.length;
+      const match = sigLines.every((line, index) => lines[start + index]?.trim() === line);
+      if (match) {
+        lines = lines.slice(0, start);
+        continue;
+      }
+    }
+    break;
+  }
+  const rest = lines.join("\n").trim();
+  if (SIGNATURE_MARK.test(rest)) return "";
+  return rest;
+}
+
+/**
+ * A blank compose, or one whose body is only the signature, is not a draft.
+ * A recipient, subject, or attachment still counts, so an in-progress letter is kept.
+ */
+export function shouldPersistDraft(
+  fields: {
+    to?: string;
+    cc?: string;
+    bcc?: string;
+    subject?: string;
+    body?: string;
+    attachments?: readonly unknown[];
+  },
+  signature: string,
+): boolean {
+  if (bodyBeyondSignature(fields.body ?? "", signature).trim() !== "") return true;
+  if ((fields.attachments?.length ?? 0) > 0) return true;
+  if ((fields.to ?? "").trim() || (fields.cc ?? "").trim() || (fields.bcc ?? "").trim() || (fields.subject ?? "").trim()) {
+    return true;
+  }
+  return false;
+}
+
+export function savedDraftThreadId(
+  threads: readonly Thread[],
+  draft: Pick<Draft, "updatedAt" | "body">,
+  threadId: string | null,
+): string | null {
+  if (threadId && threads.some((thread) => thread.id === threadId)) return threadId;
+  const match = threads.find((thread) => thread.draft?.updatedAt === draft.updatedAt && thread.draft.body === draft.body);
+  return match?.id ?? null;
+}
+
+/** Drop a draft-only thread. A thread that already has mail keeps the messages and loses the draft. */
+export function clearDraftThread(data: MailData, threadId: string): MailData {
+  return {
+    ...data,
+    threads: data.threads.flatMap((thread) => {
+      if (thread.id !== threadId) return [thread];
+      if (thread.messages.length === 0) return [];
+      return [{ ...thread, draft: null }];
+    }),
+  };
+}
+
+export function hideThreadIds(data: MailData, ids: readonly string[]): MailData {
+  const hidden = new Set(ids);
+  return {
+    ...data,
+    threads: data.threads.filter((thread) => !hidden.has(thread.id)),
+    hiddenThreadIds: [...new Set([...(data.hiddenThreadIds ?? []), ...ids])],
+  };
+}
+
 export function snoozePresets(now = Date.now()): { id: string; label: string; hint: string; at: number }[] {
   const later = new Date(now);
   later.setHours(18, 0, 0, 0);
@@ -877,6 +1009,20 @@ export function rememberBlob(path: string, text: string) {
 
 export function previewForPath(path: string): string {
   return sessionBlobs.get(path) ?? "";
+}
+
+/** Bytes for a download. Base64 is decoded; text is used when there is no binary payload. */
+export function attachmentBlobParts(body: { text: string; base64?: string | null }): BlobPart[] {
+  const encoded = body.base64?.replace(/\s/g, "") ?? "";
+  if (!encoded) return [body.text];
+  try {
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return [bytes];
+  } catch {
+    return [body.text];
+  }
 }
 
 export function sealMessages(messages: SeedMessage[], plusTag: string | null): Message[] {

@@ -129,6 +129,15 @@ describe("message body text", () => {
     assert.match(plain(kept.blocks), /quoted/);
     assert.match(plain(kept.blocks), /After the quote/);
     assert.equal(kept.hidden, null);
+
+    const started = parseBody("--\nHello from the signature line\nYou");
+    assert.match(plain(started.blocks), /Hello from the signature line/);
+    assert.match(plain(started.blocks), /^--/m);
+    assert.equal(started.hidden, null);
+
+    const onlySig = parseBody("\n\n--\nYou\nyou@example.com");
+    assert.match(plain(onlySig.blocks), /you@example.com/);
+    assert.equal(onlySig.hidden, null);
   });
 
   it("escapes markup and refuses javascript or data links", () => {

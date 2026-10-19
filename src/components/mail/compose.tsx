@@ -1,5 +1,5 @@
 import { Bold, Italic, Link2, List, Minus, Paperclip, X } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { IconButton } from "@/components/mail/bits";
 import { recentContacts, mineSet, rememberBlob, uid, type Attachment } from "@/lib/mail/model";
 import { useMail } from "@/lib/mail/store";
@@ -15,8 +15,17 @@ export function Compose() {
   const dismiss = useMail((s) => s.dismissCompose);
   const addFiles = useMail((s) => s.addComposeFiles);
   const removeFile = useMail((s) => s.removeComposeFile);
+  const autosave = useMail((s) => s.autosaveCompose);
   const area = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!compose) return;
+    const timer = window.setTimeout(() => {
+      autosave();
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [autosave, compose]);
 
   if (!compose) return null;
   const title =

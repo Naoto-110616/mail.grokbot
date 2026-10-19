@@ -654,9 +654,10 @@ describe("outbox api", () => {
       assert.equal(result.notice.includes("did not wake"), false);
       assert.notEqual(result.notice, WAKE_FAILURE);
       assert.equal(result.delivery, "waiting");
-      assert.equal(result.data.outbox?.[0]?.text, "Typed body");
+      const signed = "Typed body\n\n--\nYou\nyou@example.test";
+      assert.equal(result.data.outbox?.[0]?.text, signed);
       assert.equal(result.data.outbox?.[0]?.status, "queued");
-      assert.equal(result.data.threads[0]?.messages[0]?.body, "Typed body");
+      assert.equal(result.data.threads[0]?.messages[0]?.body, signed);
     } finally {
       if (previousDatabase === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previousDatabase;

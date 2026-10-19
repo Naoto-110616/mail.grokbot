@@ -244,7 +244,17 @@ function findHiddenCut(lines: string[]): number | null {
     cut = at;
   }
   const hidden = lines.slice(cut).some((line) => line.trim() !== "");
-  return hidden ? cut : null;
+  if (!hidden) return null;
+  // A leading `--`, or a message that is only a quote, must stay visible.
+  if (!linesHaveProse(lines.slice(0, cut))) return null;
+  return cut;
+}
+
+function linesHaveProse(lines: string[]): boolean {
+  return lines.some((line) => {
+    const trimmed = line.trim();
+    return trimmed !== "" && !isSignatureDelimiter(trimmed);
+  });
 }
 
 function trailingQuoteStart(lines: string[]): number | null {

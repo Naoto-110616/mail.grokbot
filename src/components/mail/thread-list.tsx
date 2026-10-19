@@ -71,6 +71,8 @@ export function ThreadList({
   const setListedIds = useMail((s) => s.setListedIds);
   const outbox = useMail((s) => s.outbox ?? []);
   const cancelOutbox = useMail((s) => s.cancelOutbox);
+  const destroyForever = useMail((s) => s.destroyForever);
+  const [foreverId, setForeverId] = useState<string | null>(null);
   const showChecks = selecting || checked.length > 0;
   const press = useRef<{ x: number; y: number; timer: number } | null>(null);
   const skipClick = useRef(false);
@@ -380,12 +382,12 @@ export function ThreadList({
                           {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
                         </span>
                         {density === "compact" && <RowChips thread={thread} chips={chips} />}
-                        <span className="ml-auto flex min-w-0 max-w-[50%] shrink-0 items-center gap-0.5 overflow-hidden">
-                          <span className="text-xs leading-4 text-muted tabular-nums">{when}</span>
+                        <span className="ml-auto flex shrink-0 items-center gap-0.5">
+                          <span className="max-w-[7rem] truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
                           <button
                             type="button"
                             aria-label={thread.starred ? "Unstar" : "Star"}
-                            className="inline-flex size-6 items-center justify-center rounded-full hover:bg-ink/5"
+                            className="inline-flex size-6 shrink-0 items-center justify-center rounded-full hover:bg-ink/5"
                             onPointerDown={(event) => event.stopPropagation()}
                             onClick={(event) => {
                               event.stopPropagation();
@@ -408,18 +410,33 @@ export function ThreadList({
                               Accept sender
                             </button>
                           )}
-                          <button
-                            type="button"
-                            aria-label="Done"
-                            className="hidden size-6 items-center justify-center rounded-full text-accent hover:bg-ink/5 lg:group-hover:inline-flex"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              act("archive", [thread.id]);
-                            }}
-                          >
-                            <Check className="size-4" strokeWidth={1.75} />
-                          </button>
+                          {folder === "trash" ? (
+                            <button
+                              type="button"
+                              aria-label="Delete forever"
+                              className="inline-flex h-11 shrink-0 items-center justify-center rounded-full px-2 text-sm font-semibold text-danger"
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setForeverId(thread.id);
+                              }}
+                            >
+                              Delete forever
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label="Done"
+                              className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-accent hover:bg-ink/5"
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                act("archive", [thread.id]);
+                              }}
+                            >
+                              <Check className="size-4" strokeWidth={1.75} />
+                            </button>
+                          )}
                         </span>
                       </span>
                       <span className="block max-w-full truncate text-sm font-bold leading-5">
@@ -443,6 +460,30 @@ export function ThreadList({
           </ul>
         )}
       </div>
+      {foreverId && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:items-center">
+          <button type="button" aria-label="Cancel" className="absolute inset-0 bg-ink/30" onClick={() => setForeverId(null)} />
+          <div role="dialog" aria-labelledby="delete-forever-title" className="relative w-full max-w-sm rounded-3xl border border-line bg-paper p-4 shadow-lg">
+            <p id="delete-forever-title" className="text-base font-bold">Delete this conversation forever?</p>
+            <p className="mt-1 text-base text-muted">This cannot be undone.</p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                className="h-11 flex-1 rounded-full bg-danger text-base font-semibold text-white"
+                onClick={() => {
+                  destroyForever(foreverId);
+                  setForeverId(null);
+                }}
+              >
+                Delete forever
+              </button>
+              <button type="button" className="h-11 flex-1 rounded-full border border-line text-base font-semibold" onClick={() => setForeverId(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -11,18 +11,25 @@ import {
   type Location,
   type MailData,
   type Message,
+  type Settings,
   type Swatch,
   type Thread,
   DEMO_ADDRESS,
   QUEUED_TOAST,
   aliasesFor,
+  applyFilters,
   defaultAliases,
   defaultSettings,
+  settingsFromUnknown,
   signatureFor,
   uid,
+  wakeMissNotice,
+  withSignature,
 } from "@/lib/mail/model";
+import { applySenderRules } from "@/lib/mail/bundles";
 import { reopenDoneThread } from "@/lib/mail/done";
 import { canonicalOutboxStatus, type OutboxItem } from "@/lib/mail/outbox";
+import { linkedThreadState, threadIsHidden } from "@/lib/mail/thread-place";
 import { replyWebhook, syncWebhook } from "@/lib/mail/webhook-body";
 import { deliverConfigured } from "./bridge.server.ts";
 import { loadMailConfig, type LoadedConfig } from "./config.server.ts";
@@ -68,6 +75,7 @@ type Overlay = {
   drafts: Map<string, Draft>;
   outbound: OutboundRow[];
   outbox: OutboxItem[];
+  settings: Settings | null;
 };
 
 function asBool(value: unknown): boolean {
@@ -207,7 +215,10 @@ async function readOverlay(): Promise<Overlay | null> {
       });
     }
 
-    return { threads, hidden, labels: labelsOut, filters, drafts, outbound, outbox };
+    const settingsRows = await sql<{ spec: string }>`select spec from mail_settings where id = 'settings'`;
+    const settings = settingsFromUnknown(settingsRows[0] ? readJson<unknown>(settingsRows[0].spec) : null);
+
+    return { threads, hidden, labels: labelsOut, filters, drafts, outbound, outbox, settings };
   } catch {
     return null;
   }
@@ -289,6 +300,46 @@ function mergeOutbound(threads: Thread[], outbound: OutboundRow[], results: Send
   return next;
 }
 
+function outboundThreadKeys(outbound: OutboundRow[]): Map<string, string> {
+  const keys = new Map<string, string>();
+  for (const row of outbound) {
+    if (!row.threadId) continue;
+    keys.set(row.clientSendId, row.threadId);
+    if (row.message.id) keys.set(row.message.id, row.threadId);
+    if (row.message.messageId) keys.set(row.message.messageId, row.threadId);
+    if (row.providerMessageId) keys.set(`msg_${row.providerMessageId}`, row.threadId);
+  }
+  return keys;
+}
+
+/** Stored state wins. A thread with no state gets filters once. Hidden linked ids stay gone. */
+function foldLoadedThreads(
+  threads: Thread[],
+  states: Map<string, ThreadState>,
+  hidden: Set<string>,
+  filters: Filter[],
+  keys: Map<string, string>,
+): Thread[] {
+  const out: Thread[] = [];
+  for (const thread of threads) {
+    if (threadIsHidden(thread.id, thread.messages, hidden, keys)) continue;
+    const state = linkedThreadState(thread.id, thread.messages, states, keys);
+    out.push(state ? reopenDoneThread(applyState(thread, state)) : applyFilters(thread, filters));
+  }
+  return out;
+}
+
+async function writeSettings(settings: Settings): Promise<void> {
+  const sql = await sqlOrNull();
+  if (!sql) return;
+  try {
+    await sql`insert into mail_settings (id, spec) values ('settings', ${JSON.stringify(settings)})
+      on conflict (id) do update set spec = excluded.spec`;
+  } catch {
+    // The mailbox still loads. The next persist tries the same write.
+  }
+}
+
 export async function loadBridgeMailbox(current: MailData | null, root = process.cwd()): Promise<MailData> {
   const config = await loadMailConfig(root);
   let ingest;
@@ -301,9 +352,8 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
   const identity = resolveIdentity(ingest.identity, config);
   const overlay = await readOverlay();
   const hidden = overlay?.hidden ?? new Set<string>();
-  let threads = ingest.threads
-    .map((thread) => reopenDoneThread(applyState(thread, overlay?.threads.get(thread.id))))
-    .filter((thread) => !hidden.has(thread.id));
+  const placeKeys = outboundThreadKeys(overlay?.outbound ?? []);
+  let threads = ingest.threads.filter((thread) => !hidden.has(thread.id));
   threads = mergeOutbound(threads, overlay?.outbound ?? [], ingest.sendResults, hidden);
   const owner = {
     name: identity?.displayName || current?.settings.displayName || defaultSettings().displayName,
@@ -318,27 +368,28 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
   threads = threads.map((thread) => (drafts.has(thread.id) ? { ...thread, draft: drafts.get(thread.id) ?? thread.draft } : thread));
   for (const [id, draft] of drafts) {
     if (hidden.has(id) || threads.some((thread) => thread.id === id)) continue;
-    const state = overlay?.threads.get(id);
     const tag = (identity?.aliases ?? current?.aliases ?? []).find((alias) => alias.email === draft.from)?.tag ?? null;
     threads.unshift({
       id,
       subject: draft.subject.trim() || "(no subject)",
-      category: state?.category ?? "primary",
-      location: state?.location ?? "drafts",
-      labels: state?.labels ?? [],
+      category: "primary",
+      location: "drafts",
+      labels: [],
       plusTag: tag,
-      starred: state?.starred ?? false,
-      important: state?.important ?? false,
+      starred: false,
+      important: false,
       unread: false,
-      muted: state?.muted ?? false,
-      snoozeUntil: state?.snoozeUntil ?? null,
+      muted: false,
+      snoozeUntil: null,
       messages: [],
       draft,
       account: "grokbot",
     });
   }
 
-  const prefs = current?.settings ?? defaultSettings();
+  threads = foldLoadedThreads(threads, overlay?.threads ?? new Map(), hidden, overlay?.filters ?? [], placeKeys);
+
+  const prefs = overlay?.settings ?? current?.settings ?? defaultSettings();
   const aliases = identity?.aliases?.length
     ? identity.aliases
     : current?.aliases?.length
@@ -354,6 +405,8 @@ export async function loadBridgeMailbox(current: MailData | null, root = process
         signature: signatureIsCustom ? prefs.signature : signatureFor(identity.displayName, identity.address),
       }
     : prefs;
+  if (overlay && !overlay.settings) await writeSettings(settings);
+  threads = applySenderRules(threads, settings.senderRules);
   return {
     threads,
     labels: overlay?.labels ?? current?.labels ?? [],
@@ -371,6 +424,8 @@ async function persistMailbox(data: MailData): Promise<void> {
   const sql = await sqlOrNull();
   if (!sql) return;
   try {
+    await sql`insert into mail_settings (id, spec) values ('settings', ${JSON.stringify(data.settings)})
+      on conflict (id) do update set spec = excluded.spec`;
     const threads = data.threads.filter((thread) => thread.account !== "gmail");
     for (const thread of threads) {
       await sql`insert into mail_thread_state (
@@ -575,28 +630,29 @@ function withOutboxItem(data: MailData, request: SendRequest, clientSendId: stri
 
 export async function sendMailbox(data: MailData, request: SendRequest, root = process.cwd()) {
   const current = assertMail(data);
+  const signed = { ...request, body: withSignature(request.body, current.settings.signature) };
   const clientSendId = `send_${uid()}`;
-  const message = waitingMessage(current, request, clientSendId);
-  const next = withOutboxItem(insertOutgoing(current, request, message), request, clientSendId);
+  const message = waitingMessage(current, signed, clientSendId);
+  const next = withOutboxItem(insertOutgoing(current, signed, message), signed, clientSendId);
   await persistMailbox(next);
-  await stampOutbound(clientSendId, request.replyToId, request.threadId);
+  await stampOutbound(clientSendId, signed.replyToId, signed.threadId);
   const woke = await deliverConfigured(
     replyWebhook({
       clientSendId,
       from: message.from.email,
-      to: request.to.map((address) => address.email),
-      cc: request.cc.map((address) => address.email),
+      to: signed.to.map((address) => address.email),
+      cc: signed.cc.map((address) => address.email),
       bcc: [],
-      subject: request.subject,
-      text: request.body,
-      replyToMessageId: request.replyToMessageId,
-      threadId: request.threadId,
-      attachments: request.attachments,
+      subject: signed.subject,
+      text: signed.body,
+      replyToMessageId: signed.replyToMessageId,
+      threadId: signed.threadId,
+      attachments: signed.attachments,
     }),
     root,
   );
   if (!woke.ok && woke.error !== "unconfigured") {
-    return { data: next, notice: "Grok Bot did not wake. This reply was not sent.", delivery: "waiting" as const };
+    return { data: next, notice: wakeMissNotice(signed.mode), delivery: "waiting" as const };
   }
   return { data: next, notice: QUEUED_TOAST, delivery: "waiting" as const };
 }

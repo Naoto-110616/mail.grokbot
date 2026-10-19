@@ -15,16 +15,17 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconButton, LabelChip, Monogram, PlusChip, Sheet } from "@/components/mail/bits";
+import type { AttachmentBody } from "@/lib/mail/backend";
 import { parseBody, plainSnippet, type BodyBlock, type Inline } from "@/lib/mail/body-text";
 import {
   type Attachment,
   type Message,
   CATEGORIES,
+  attachmentBlobParts,
   formatAddress,
   formatFull,
   formatWhen,
   mineSet,
-  previewForPath,
 } from "@/lib/mail/model";
 import { inboundSenders } from "@/lib/mail/bundles";
 import { emailDomain, latestInbound } from "@/lib/mail/gate";
@@ -51,6 +52,9 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   // null means "default": the focused message, or the latest one.
   const [openIds, setOpenIds] = useState<string[] | null>(null);
   const [file, setFile] = useState<Attachment | null>(null);
+  const [fileBody, setFileBody] = useState<AttachmentBody | null>(null);
+  const [fileMissing, setFileMissing] = useState(false);
+  const loadAttachment = useMail((s) => s.loadAttachment);
   const focusRef = useRef<HTMLElement | null>(null);
 
   const threadId = thread?.id;
@@ -65,6 +69,29 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   useEffect(() => {
     focusRef.current?.scrollIntoView({ block: "nearest" });
   }, [threadId, focused]);
+  useEffect(() => {
+    if (!file) {
+      setFileBody(null);
+      setFileMissing(false);
+      return;
+    }
+    let cancel = false;
+    setFileBody(null);
+    setFileMissing(false);
+    void loadAttachment(file).then(
+      (body) => {
+        if (cancel) return;
+        if (!body) setFileMissing(true);
+        else setFileBody(body);
+      },
+      () => {
+        if (!cancel) setFileMissing(true);
+      },
+    );
+    return () => {
+      cancel = true;
+    };
+  }, [file, loadAttachment]);
 
   if (!thread) {
     return (
@@ -108,7 +135,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
             <MoreHorizontal className="size-5" />
           </IconButton>
           {menu && (
-            <div className="glass absolute right-0 top-12 z-20 w-60 rounded-2xl p-1">
+            <div className="absolute right-0 top-12 z-20 w-60 rounded-2xl border border-line bg-paper p-1 shadow-lg">
               <MenuBtn onClick={() => act("unread", [thread.id])}>Mark unread</MenuBtn>
               <MenuBtn onClick={() => act("read", [thread.id])}>Mark read</MenuBtn>
               <MenuBtn onClick={() => act("important", [thread.id])}>
@@ -285,11 +312,22 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
       </div>
       {file && (
         <Sheet title={file.filename} onClose={() => setFile(null)} wide>
-          <pre className="mail-body max-h-80 max-w-full overflow-auto whitespace-pre-wrap rounded-2xl bg-paper-2 p-3 font-sans text-xs text-ink">{previewForPath(file.path)}</pre>
+          {fileMissing ? (
+            <p className="text-base text-ink">Could not read this file.</p>
+          ) : fileBody?.text ? (
+            <pre className="mail-body max-h-80 max-w-full overflow-auto whitespace-pre-wrap rounded-2xl bg-paper-2 p-3 font-sans text-base text-ink">{fileBody.text}</pre>
+          ) : fileBody?.base64 ? (
+            <p className="text-base text-ink">This file is ready to download.</p>
+          ) : (
+            <p className="text-base text-muted">Reading this file.</p>
+          )}
           <button
             type="button"
-            className="mt-3 inline-flex h-11 items-center gap-2 rounded-full bg-accent px-4 text-sm font-semibold text-accent-fg"
-            onClick={() => download(file)}
+            className="mt-3 inline-flex h-11 items-center gap-2 rounded-full bg-accent px-4 text-base font-semibold text-accent-fg disabled:opacity-50"
+            disabled={!fileBody}
+            onClick={() => {
+              if (fileBody) download(file, fileBody);
+            }}
           >
             <Download className="size-4" /> Download
           </button>
@@ -381,7 +419,7 @@ function BodyBlocks({ blocks }: { blocks: BodyBlock[] }) {
           return (
             <p key={index} className="flex flex-wrap gap-x-3 gap-y-1">
               {block.links.map((link, linkIndex) => (
-                <Anchor key={linkIndex} href={link.href} label={link.label} />
+                <Anchor key={linkIndex} href={link.href} label={link.label} tall />
               ))}
             </p>
           );
@@ -427,16 +465,25 @@ function Inlines({ inlines }: { inlines: Inline[] }) {
   );
 }
 
-function Anchor({ href, label }: { href: string; label: string }) {
+function Anchor({ href, label, tall = false }: { href: string; label: string; tall?: boolean }) {
   return (
-    <a href={href} target="_blank" rel="noreferrer" className="wrap-anywhere inline max-w-full text-accent underline-offset-2 hover:underline">
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={
+        tall
+          ? "wrap-anywhere inline-flex min-h-11 max-w-full items-center text-accent underline-offset-2 hover:underline"
+          : "wrap-anywhere inline max-w-full text-accent underline-offset-2 hover:underline"
+      }
+    >
       {label}
     </a>
   );
 }
 
-function download(file: Attachment) {
-  const blob = new Blob([previewForPath(file.path)], { type: "text/plain" });
+function download(file: Attachment, body: AttachmentBody) {
+  const blob = new Blob(attachmentBlobParts(body), { type: body.mime || file.mime || "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

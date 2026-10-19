@@ -27,9 +27,13 @@ import {
   accountOf,
   activityIso,
   applyAct,
+  clearDraftThread,
   emptyMailbox,
+  hideThreadIds,
   parseAddressList,
   replyFields,
+  savedDraftThreadId,
+  shouldPersistDraft,
   snapshotOf,
   uid,
   visibleThreads,
@@ -156,6 +160,8 @@ type State = MailData &
     dismissToast: () => void;
     checkMail: () => void;
     emptyFolder: () => void;
+    destroyForever: (id: string) => void;
+    autosaveCompose: () => void;
     resetMailbox: () => void;
     data: () => MailData;
     account: AccountId;
@@ -275,13 +281,20 @@ export const useMail = create<State>()(
         return run;
       };
 
-      const commit = (incoming: MailData, extras: Partial<State> = {}) => {
+      const commit = (incoming: MailData, extras: Partial<State> = {}, options?: { settingsFrom?: "server" }) => {
         const current = dataOf(get());
+        const fromServer = options?.settingsFrom === "server";
         const merged =
           get().backendId === "bot-bridge"
-            ? applyBackendData(current, incoming)
-            : { ...incoming, settings: current.settings, gmail: current.gmail };
+            ? applyBackendData(current, incoming, fromServer ? { settingsFrom: "server" } : undefined)
+            : { ...incoming, settings: fromServer ? incoming.settings : current.settings, gmail: current.gmail };
         set({ ...sliceOf(merged), ...extras });
+      };
+
+      const persistClearedDraft = async (id: string) => {
+        const cleared = clearDraftThread(dataOf(get()), id);
+        set({ ...sliceOf(cleared) });
+        await getActiveBackend().setLabels(dataOf(get()), "", []);
       };
 
       const persistProduct = () =>
@@ -326,7 +339,7 @@ export const useMail = create<State>()(
               await fetchPublicMailConfig();
               const current = dataOf(get());
               const incoming = await getActiveBackend().bootstrap(current);
-              const merged = applyBackendData({ ...current, gmail: "off" }, incoming);
+              const merged = applyBackendData({ ...current, gmail: "off" }, incoming, { settingsFrom: "server" });
               set({ ...sliceOf(merged), backendId: "bot-bridge", account: "grokbot", gmail: "off" });
             } catch {
               set({ threads: [], gmail: "off", account: "grokbot", backendId: "bot-bridge" });
@@ -338,7 +351,7 @@ export const useMail = create<State>()(
             if (get().backendId !== "bot-bridge") return;
             const current = dataOf(get());
             const incoming = await getActiveBackend().bootstrap(current);
-            commit(incoming);
+            commit(incoming, {}, { settingsFrom: "server" });
           }),
 
         loadAttachment: (attachment) => getActiveBackend().getAttachment(attachment),
@@ -586,7 +599,7 @@ export const useMail = create<State>()(
               showCc: Boolean(fields.cc),
               showBcc: false,
               subject: fields.subject,
-              body: withSignature(fields.body, s.settings.signature),
+              body: fields.body,
               attachments: mode === "forward" ? message.attachments.map((file) => ({ ...file, id: uid() })) : [],
               minimized: false,
               expanded: false,
@@ -702,9 +715,13 @@ export const useMail = create<State>()(
           const s = get();
           const compose = s.compose;
           if (!compose) return;
-          const dirty = Boolean(compose.to.trim() || compose.subject.trim() || compose.body.trim() || compose.attachments.length);
-          if (!dirty) {
+          if (!shouldPersistDraft(compose, s.settings.signature)) {
+            const id = compose.draftThreadId;
             set({ compose: null });
+            if (!id) return;
+            void enqueue(async () => {
+              await persistClearedDraft(id);
+            });
             return;
           }
           const snapshot = snapshotOf(dataOf(s));
@@ -728,6 +745,45 @@ export const useMail = create<State>()(
           });
         },
 
+        autosaveCompose: () => {
+          void enqueue(async () => {
+            const current = get();
+            const compose = current.compose;
+            if (!compose) return;
+            const draft = {
+              mode: compose.mode,
+              replyToId: compose.replyToId,
+              from: compose.from,
+              to: compose.to,
+              cc: compose.cc,
+              bcc: compose.bcc,
+              subject: compose.subject,
+              body: compose.body,
+              updatedAt: new Date().toISOString(),
+              attachments: compose.attachments,
+            };
+            if (!shouldPersistDraft(compose, current.settings.signature)) {
+              const id = compose.draftThreadId;
+              if (!id) return;
+              await persistClearedDraft(id);
+              return;
+            }
+            const threadId = compose.draftThreadId;
+            const data = await getActiveBackend().saveDraft(dataOf(get()), draft, threadId);
+            const composeNow = get().compose;
+            if (!composeNow) {
+              commit(data);
+              return;
+            }
+            const savedId = savedDraftThreadId(data.threads, draft, threadId);
+            if (savedId && savedId !== composeNow.draftThreadId) {
+              commit(data, { compose: { ...composeNow, draftThreadId: savedId } });
+              return;
+            }
+            commit(data);
+          });
+        },
+
         addFilter: (filter) => {
           set({ filters: [...get().filters, { ...filter, id: uid() }] });
           void persistProduct();
@@ -740,7 +796,10 @@ export const useMail = create<State>()(
           set({ filters: get().filters.filter((filter) => filter.id !== id) });
           void persistProduct();
         },
-        updateSettings: (partial) => set({ settings: { ...get().settings, ...partial } }),
+        updateSettings: (partial) => {
+          set({ settings: { ...get().settings, ...partial } });
+          void persistProduct();
+        },
 
         toggleSaved: (query) => {
           const text = query.trim();
@@ -751,6 +810,7 @@ export const useMail = create<State>()(
             ? current.filter((item) => item.id !== existing.id)
             : savedSearchesOf([...current, { id: uid(), query: text }]);
           set({ settings: { ...get().settings, savedSearches } });
+          void persistProduct();
         },
 
         rememberSearch: (query) => {
@@ -758,12 +818,14 @@ export const useMail = create<State>()(
           if (!text) return;
           const recentSearches = recentSearchesOf([text, ...recentSearchesOf(get().settings.recentSearches)]);
           set({ settings: { ...get().settings, recentSearches } });
+          void persistProduct();
         },
 
         forgetSearch: (query) => {
           const text = query.trim().toLowerCase();
           const recentSearches = recentSearchesOf(get().settings.recentSearches).filter((item) => item.toLowerCase() !== text);
           set({ settings: { ...get().settings, recentSearches } });
+          void persistProduct();
         },
 
         moveSender: (email, category) => {
@@ -819,6 +881,7 @@ export const useMail = create<State>()(
           const book = mode === "off" ? current : acceptStoredSenders(current, before.threads);
           const gated = applyGate(before.threads, book, before.aliases);
           set({ settings: { ...before.settings, gate: gated.book }, threads: gated.threads });
+          void persistProduct();
         },
 
         setGateList: (gateList) => set({ gateList }),
@@ -844,7 +907,7 @@ export const useMail = create<State>()(
           const snapshot = snapshotOf(dataOf(s));
           void enqueue(async () => {
             const result = await getActiveBackend().sync(dataOf(get()));
-            commit(result.data, { toast: { text: result.notice, snapshot } });
+            commit(result.data, { toast: { text: result.notice, snapshot } }, { settingsFrom: "server" });
           });
         },
 
@@ -865,21 +928,41 @@ export const useMail = create<State>()(
           void persistProduct();
         },
 
+        destroyForever: (id) => {
+          const before = get();
+          const thread = before.threads.find((item) => item.id === id);
+          if (!thread || thread.location !== "trash") return;
+          const snapshot = snapshotOf(dataOf(before));
+          const next = hideThreadIds(dataOf(before), [id]);
+          set({
+            ...sliceOf(next),
+            openId: before.openId === id ? null : before.openId,
+            viewing: before.openId === id ? "list" : before.viewing,
+            checked: before.checked.filter((item) => item !== id),
+            toast: { text: "Deleted forever", snapshot },
+          });
+          void persistProduct();
+        },
+
         resetMailbox: () => {
           void enqueue(async () => {
             setActiveBackend("bot-bridge");
             const incoming = await getActiveBackend().bootstrap(dataOf(get()));
-            commit(incoming, {
-              folder: "inbox",
-              account: "grokbot",
-              category: "all",
-              query: "",
-              openId: null,
-              checked: [],
-              viewing: "list",
-              compose: null,
-              toast: { text: "Mailbox reloaded", snapshot: null },
-            });
+            commit(
+              incoming,
+              {
+                folder: "inbox",
+                account: "grokbot",
+                category: "all",
+                query: "",
+                openId: null,
+                checked: [],
+                viewing: "list",
+                compose: null,
+                toast: { text: "Mailbox reloaded", snapshot: null },
+              },
+              { settingsFrom: "server" },
+            );
           });
         },
       };
