@@ -69,7 +69,7 @@ npm run preview
 
 ## Bot
 
-The app exposes ingest and the outbox. The bot speaks to the mail provider. Shapes are in `docs/INGEST.md` and `docs/bot-setup.md`. The setup skill is coming next. `docs/skill/SKILL.md` is only a draft recipe.
+The app exposes ingest and the outbox. The bot speaks to the mail provider. Shapes are in `docs/INGEST.md` and `docs/bot-setup.md`. The setup skill is coming next. It is not in this repo yet.
 
 **Ingest.** `POST /api/ingest` with `Authorization: Bearer` and the ingest token. The body is `{ "items": [] }`, at most 200 items and 5 MB. `html` is a string, at most 1 MiB (1,048,576 UTF-8 bytes). `attachments[].content` is standard base64, at most 1 MiB decoded, and it is kept only when the attachment id matches. `headers` may be a `{ "name", "value" }` list. `GET /api/ingest/state` returns `{ "newest", "counts" }`. These routes are outside the site-password cookie. A wrong token is 401. An unset token is 503.
 
