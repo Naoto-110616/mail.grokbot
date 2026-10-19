@@ -65,10 +65,17 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
+  fullPaths:
+    '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
-  id: '__root__' | '/' | '/login' | '/m/$messageId' | '/o/$clientSendId' | '/t/$threadId'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/m/$messageId'
+    | '/o/$clientSendId'
+    | '/t/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
