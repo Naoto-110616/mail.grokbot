@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { defaultSettings, keepLocalSettings, mineSet, type Message, type Thread } from "./model.ts";
 import {
+  automatedMail,
   buildQuickRequest,
   chipsAllowed,
   defaultQuickReplies,
@@ -177,6 +178,67 @@ describe("quick replies", () => {
       id: "out",
       messages: [message({ id: "out-m", from: { name: "You", email: "you@example.test" }, direction: "outbound" })],
     })), false);
+  });
+
+  it("hides chips for list mail, auto-submitted mail, and bot or alert senders", () => {
+    const human = thread({ id: "human" });
+    assert.equal(chipsAllowed(human), true);
+    assert.equal(automatedMail(human.messages[0]!), false);
+    assert.equal(chipsAllowed(thread({
+      id: "list",
+      messages: [message({
+        id: "list-m",
+        from: { name: "Ada", email: "ada@example.com" },
+        listUnsubscribe: "<mailto:leave@example.com>",
+      })],
+    })), false);
+    assert.equal(chipsAllowed(thread({
+      id: "auto",
+      messages: [message({
+        id: "auto-m",
+        from: { name: "Ada", email: "ada@example.com" },
+        autoSubmitted: "auto-generated",
+      })],
+    })), false);
+    assert.equal(chipsAllowed(thread({
+      id: "person",
+      messages: [message({
+        id: "person-m",
+        from: { name: "Ada", email: "ada@example.com" },
+        autoSubmitted: "no",
+      })],
+    })), true);
+    for (const from of [
+      { name: "BotBagger", email: "alerts@example.com" },
+      { name: "Disk Alert", email: "ops@example.com" },
+      { name: "Ada", email: "botbagger@example.com" },
+      { name: "Queue", email: "alert@example.com" },
+    ]) {
+      const row = thread({ id: from.email, messages: [message({ id: "m", from })] });
+      assert.equal(chipsAllowed(row), false, from.email);
+      assert.equal(buildQuickRequest({
+        thread: row,
+        reply: thanks,
+        mode: "reply",
+        from: "you@example.com",
+        mine: MINE,
+        signature: "",
+        displayName: "You",
+      }), null);
+    }
+    assert.equal(chipsAllowed(thread({
+      id: "abbott",
+      messages: [message({ id: "abbott-m", from: { name: "Abbott Lane", email: "abbott@example.com" } })],
+    })), true);
+    assert.equal(chipsAllowed(thread({
+      id: "both",
+      messages: [message({ id: "both-m", from: { name: "Both", email: "both@example.com" } })],
+    })), true);
+    const reader = readFileSync(new URL("../../components/mail/reader.tsx", import.meta.url), "utf8");
+    assert.match(reader, /setChipsOpen/);
+    assert.match(reader, /chipsAllowed\(thread\)/);
+    assert.match(reader, /Hide replies/);
+    assert.equal(reader.includes('aria-label="Quick replies"'), false);
   });
 
   it("keeps three to five replies and updates what the reader will show", () => {

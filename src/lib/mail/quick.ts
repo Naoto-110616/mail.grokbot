@@ -28,6 +28,19 @@ export type QuickSend = {
 };
 
 const AUTO = /^(?:no-?reply|noreply|notifications?|newsletter|mailer-daemon|postmaster)$/i;
+const BOT_LOCAL =
+  /(?:^|[^a-z0-9])(?:bots?|alerts?|alarms?|notifiers?|monitors?|automated|daemon)(?:[^a-z0-9]|$)|botbagger/i;
+const BOT_NAME = /\b(?:bots?|alerts?|alarms?|notifiers?|automated)\b|botbagger/i;
+
+/** No-reply, list mail, auto-submitted, and bot or alert senders are not people. */
+export function automatedMail(message: Message): boolean {
+  const local = localPart(message.from.email);
+  if (AUTO.test(local) || BOT_LOCAL.test(local)) return true;
+  if (BOT_NAME.test(message.from.name ?? "")) return true;
+  if ((message.listUnsubscribe ?? "").trim()) return true;
+  const submitted = (message.autoSubmitted ?? "").trim().toLowerCase();
+  return submitted !== "" && submitted !== "no";
+}
 
 export function defaultQuickReplies(): QuickReply[] {
   return [
@@ -64,7 +77,7 @@ export function chipsAllowed(thread: Thread): boolean {
   if (thread.category === "promotions") return false;
   const message = latestInbound(thread);
   if (!message || message.direction === "outbound") return false;
-  if (AUTO.test(localPart(message.from.email))) return false;
+  if (automatedMail(message)) return false;
   return true;
 }
 

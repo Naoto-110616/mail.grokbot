@@ -64,6 +64,39 @@ function asStringList(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === "string" && item.trim() !== "").map((item) => item.trim());
 }
 
+function clipSignal(value: string, max: number): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, max);
+}
+
+function headerValue(headers: Record<string, unknown> | null, name: string): string {
+  if (!headers) return "";
+  const want = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === want) return asString(value);
+  }
+  return "";
+}
+
+/** List-Unsubscribe and Auto-Submitted from an ingest item or a stored from_json object. */
+export function readMailSignals(value: unknown): { listUnsubscribe: string | null; autoSubmitted: string | null } {
+  const row = asRecord(value);
+  if (!row) return { listUnsubscribe: null, autoSubmitted: null };
+  const headers = asRecord(row.headers);
+  const list = asString(row.listUnsubscribe) || asString(row["list-unsubscribe"]) || headerValue(headers, "list-unsubscribe");
+  const auto = asString(row.autoSubmitted) || asString(row["auto-submitted"]) || headerValue(headers, "auto-submitted");
+  return { listUnsubscribe: clipSignal(list, 2000), autoSubmitted: clipSignal(auto, 80) };
+}
+
+/** Address JSON plus the two automation signals, so a reload can still hide quick replies. */
+export function fromJsonWithSignals(message: Message): string {
+  const payload: Record<string, string> = { name: message.from.name, email: message.from.email };
+  if (message.listUnsubscribe) payload.listUnsubscribe = message.listUnsubscribe;
+  if (message.autoSubmitted) payload.autoSubmitted = message.autoSubmitted;
+  return JSON.stringify(payload);
+}
+
 function asAttachment(value: unknown): Attachment | null {
   const row = asRecord(value);
   if (!row) return null;
@@ -255,6 +288,7 @@ function parseMessage(row: Record<string, unknown>, fallbackId: string): { messa
   if (!from) return null;
   const id = asString(row.id) || fallbackId;
   const attachments = Array.isArray(row.attachments) ? row.attachments.map(asAttachment).filter((item): item is Attachment => item !== null) : [];
+  const signals = readMailSignals(row);
   const message: Message = {
     id,
     messageId: asString(row.messageId) || null,
@@ -275,6 +309,8 @@ function parseMessage(row: Record<string, unknown>, fallbackId: string): { messa
     threadHint: parseThreadHint(row.threadHint),
     direction: parseDirection(row.direction),
   };
+  if (signals.listUnsubscribe) message.listUnsubscribe = signals.listUnsubscribe;
+  if (signals.autoSubmitted) message.autoSubmitted = signals.autoSubmitted;
   const unread = row.unread === undefined ? true : Boolean(row.unread);
   return { message, unread };
 }

@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { readIngestBytes, resolveInside } from "../../server/mail/attachments.server.ts";
-import { applySendResults, deliveryForStatus, loadIngest, threadsFromMessages, withOutboundOwner } from "../../server/mail/ingest.server.ts";
+import { applySendResults, classifyIngestItem, deliveryForStatus, fromJsonWithSignals, loadIngest, readMailSignals, threadsFromMessages, withOutboundOwner } from "../../server/mail/ingest.server.ts";
 import { groupByHeaders, type ThreadableMessage } from "./threading.ts";
 import { inFolder, listSender, mineSet, type Message, type Thread } from "./model.ts";
 
@@ -16,6 +16,39 @@ function threadFor(threads: Thread[], id: string) {
 }
 
 describe("ingest fixtures", () => {
+  it("keeps list-unsubscribe and auto-submitted for the chips rule", () => {
+    const classified = classifyIngestItem({
+      kind: "message",
+      id: "msg_auto",
+      from: { name: "Ada", email: "ada@example.com" },
+      headers: { "List-Unsubscribe": "<mailto:leave@example.com>", "Auto-Submitted": "auto-generated" },
+      body: "Hi",
+      date: "2026-10-18T12:00:00.000Z",
+    });
+    assert.equal(classified.ok, true);
+    if (!classified.ok || classified.kind !== "message") return;
+    assert.equal(classified.message.listUnsubscribe, "<mailto:leave@example.com>");
+    assert.equal(classified.message.autoSubmitted, "auto-generated");
+    assert.equal(classified.message.from.email, "ada@example.com");
+    const stored = JSON.parse(fromJsonWithSignals(classified.message)) as Record<string, string>;
+    assert.equal(stored.email, "ada@example.com");
+    assert.equal(stored.name, "Ada");
+    assert.deepEqual(readMailSignals(stored), {
+      listUnsubscribe: "<mailto:leave@example.com>",
+      autoSubmitted: "auto-generated",
+    });
+    const plain = classifyIngestItem({
+      kind: "message",
+      id: "msg_plain",
+      from: { name: "Ada", email: "ada@example.com" },
+      body: "Hi",
+    });
+    assert.equal(plain.ok && plain.kind === "message" && plain.message.listUnsubscribe, undefined);
+    if (plain.ok && plain.kind === "message") {
+      assert.deepEqual(JSON.parse(fromJsonWithSignals(plain.message)), { name: "Ada", email: "ada@example.com" });
+    }
+  });
+
   it("threads by headers, then one subject fallback, and keeps the earliest plus tag", async () => {
     const loaded = await loadIngest(fixtures);
     assert.equal(loaded.identity?.address, "you@example.test");

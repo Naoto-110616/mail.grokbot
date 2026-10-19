@@ -16,7 +16,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IconButton, LabelChip, Monogram, PlusChip, Sheet } from "@/components/mail/bits";
 import type { AttachmentBody } from "@/lib/mail/backend";
-import { parseBody, plainSnippet, type BodyBlock, type Inline } from "@/lib/mail/body-text";
+import { parseBody, quotedControlLabel, type BodyBlock, type Inline } from "@/lib/mail/body-text";
 import {
   type Attachment,
   type Message,
@@ -47,10 +47,11 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   const quickReplies = quickRepliesOf(useMail((s) => s.settings.quickReplies));
   const aliases = useMail((s) => s.aliases);
   const [replyAll, setReplyAll] = useState(false);
+  const [chipsOpen, setChipsOpen] = useState(false);
   const focusMessageId = useMail((s) => s.focusMessageId);
   const [menu, setMenu] = useState(false);
-  // null means "default": the focused message, or the latest one.
-  const [openIds, setOpenIds] = useState<string[] | null>(null);
+  // Empty: every message starts collapsed to the sender and time.
+  const [openIds, setOpenIds] = useState<string[]>([]);
   const [file, setFile] = useState<Attachment | null>(null);
   const [fileBody, setFileBody] = useState<AttachmentBody | null>(null);
   const [fileMissing, setFileMissing] = useState(false);
@@ -62,9 +63,10 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   const focused =
     focusMessageId && thread?.messages.some((message) => message.id === focusMessageId) ? focusMessageId : null;
   useEffect(() => {
-    setOpenIds(null);
+    setOpenIds([]);
     setMenu(false);
     setReplyAll(false);
+    setChipsOpen(false);
   }, [threadId, lastMessageId, focused]);
   useEffect(() => {
     focusRef.current?.scrollIntoView({ block: "nearest" });
@@ -205,28 +207,27 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
           </div>
           <div className="mt-3 space-y-1">
             {thread.messages.map((message) => {
-              const expanded = openIds ?? (focused ? [focused] : lastMessageId ? [lastMessageId] : []);
-              const open = expanded.includes(message.id);
+              const open = openIds.includes(message.id);
               return (
                 <article
                   key={message.id}
                   ref={focused === message.id ? focusRef : undefined}
-                  className="rounded-2xl border border-line bg-paper-2"
+                  className="min-w-0 rounded-2xl border border-line bg-paper-2"
                 >
                   <button
                     type="button"
                     aria-expanded={open}
-                    className={`flex w-full min-w-0 max-w-full gap-3 px-3 py-2 text-left ${open ? "items-start" : "items-center"}`}
+                    className={`flex min-h-11 w-full min-w-0 max-w-full gap-3 px-3 py-2 text-left ${open ? "items-start" : "items-center"}`}
                     onClick={() =>
-                      setOpenIds(
-                        open ? expanded.filter((id) => id !== message.id) : [...expanded, message.id],
+                      setOpenIds((current) =>
+                        current.includes(message.id) ? current.filter((id) => id !== message.id) : [...current, message.id],
                       )
                     }
                   >
                     <MessageHeader message={message} open={open} />
                   </button>
                   {open && (
-                    <div className="min-w-0 max-w-full px-3 pb-4 sm:px-14">
+                    <div className="min-w-0 max-w-full px-3 pb-4">
                       <Body text={message.body} />
                       {message.attachments.length > 0 && (
                         <ul className="mt-4 flex flex-col gap-2">
@@ -261,32 +262,40 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
               <span className="mt-1 block truncate text-sm text-muted">{thread.draft.body.replace(/\s+/g, " ").slice(0, 140) || "Empty draft"}</span>
             </button>
           )}
-          <div className="mt-4 hidden flex-wrap gap-2 pb-8 lg:flex">
-            <TextBtn onClick={() => openCompose("reply", thread.id)}>
-              <Reply className="size-4" /> Reply
-            </TextBtn>
-            <TextBtn onClick={() => openCompose("replyAll", thread.id)}>
-              <ReplyAll className="size-4" /> Reply all
-            </TextBtn>
-            <TextBtn onClick={() => openCompose("forward", thread.id)}>
-              <Forward className="size-4" /> Forward
-            </TextBtn>
-          </div>
         </div>
       </div>
-      {showChips && (
-        <div className="flex min-w-0 max-w-full gap-2 overflow-x-auto border-t border-line py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]" role="group" aria-label="Quick replies">
-          {many && (
-            <button
-              type="button"
-              aria-pressed={replyAll}
-              className={`h-11 shrink-0 rounded-full border px-4 text-sm font-medium ${replyAll ? "border-ink bg-ink text-paper" : "border-line"}`}
-              onClick={() => setReplyAll((value) => !value)}
-            >
-              {replyAll ? "Reply all" : "Reply to sender"}
-            </button>
-          )}
-          {quickReplies.map((reply) => (
+      <div
+        className="safe-bottom flex min-w-0 max-w-full gap-2 overflow-x-auto border-t border-line py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]"
+        role="group"
+        aria-label="Reply"
+      >
+        <TextBtn className="shrink-0" onClick={() => openCompose("reply", thread.id)}>
+          <Reply className="size-4 shrink-0" /> Reply
+        </TextBtn>
+        <TextBtn className="shrink-0" onClick={() => openCompose("replyAll", thread.id)}>
+          <ReplyAll className="size-4 shrink-0" /> All
+        </TextBtn>
+        <TextBtn className="shrink-0" onClick={() => openCompose("forward", thread.id)}>
+          <Forward className="size-4 shrink-0" /> Forward
+        </TextBtn>
+        {showChips && (
+          <TextBtn className="shrink-0" pressed={chipsOpen} expanded={chipsOpen} onClick={() => setChipsOpen((open) => !open)}>
+            {chipsOpen ? "Hide replies" : "Replies"}
+          </TextBtn>
+        )}
+        {showChips && chipsOpen && many && (
+          <button
+            type="button"
+            aria-pressed={replyAll}
+            className={`h-11 shrink-0 rounded-full border px-4 text-sm font-medium ${replyAll ? "border-ink bg-ink text-paper" : "border-line"}`}
+            onClick={() => setReplyAll((value) => !value)}
+          >
+            {replyAll ? "Reply all" : "Reply to sender"}
+          </button>
+        )}
+        {showChips &&
+          chipsOpen &&
+          quickReplies.map((reply) => (
             <button
               key={reply.id}
               type="button"
@@ -297,18 +306,6 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
               {reply.name}
             </button>
           ))}
-        </div>
-      )}
-      <div className="safe-bottom flex min-w-0 max-w-full gap-2 border-t border-line py-2 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] lg:hidden">
-        <TextBtn className="flex-1" onClick={() => openCompose("reply", thread.id)}>
-          <Reply className="size-4 shrink-0" /> <span className="truncate">Reply</span>
-        </TextBtn>
-        <TextBtn className="flex-1" onClick={() => openCompose("replyAll", thread.id)}>
-          <ReplyAll className="size-4 shrink-0" /> <span className="truncate">All</span>
-        </TextBtn>
-        <TextBtn className="flex-1" onClick={() => openCompose("forward", thread.id)}>
-          <Forward className="size-4 shrink-0" /> <span className="truncate">Forward</span>
-        </TextBtn>
       </div>
       {file && (
         <Sheet title={file.filename} onClose={() => setFile(null)} wide>
@@ -343,9 +340,8 @@ function MessageHeader({ message, open }: { message: Message; open: boolean }) {
     return (
       <>
         <Monogram name={message.from.name} email={message.from.email} />
-        <span className="max-w-[42%] min-w-0 shrink truncate text-sm font-bold">{message.from.name || message.from.email}</span>
-        <span className="min-w-0 flex-1 truncate text-xs text-muted">{plainSnippet(message.body)}</span>
-        <span className="max-w-[30%] shrink-0 truncate text-xs text-muted tabular-nums">{formatWhen(message.date)}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-bold">{message.from.name || message.from.email}</span>
+        <span className="shrink-0 truncate text-xs text-muted tabular-nums">{formatWhen(message.date)}</span>
       </>
     );
   }
@@ -371,12 +367,26 @@ function MenuBtn({ children, onClick }: { children: string; onClick: () => void 
   );
 }
 
-function TextBtn({ children, onClick, className = "" }: { children: ReactNode; onClick: () => void; className?: string }) {
+function TextBtn({
+  children,
+  onClick,
+  className = "",
+  pressed,
+  expanded,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  className?: string;
+  pressed?: boolean;
+  expanded?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-11 min-w-0 items-center justify-center gap-2 overflow-hidden rounded-full border border-line px-3 text-sm font-medium hover:bg-ink/5 ${className}`}
+      aria-pressed={pressed}
+      aria-expanded={expanded}
+      className={`inline-flex h-11 min-w-0 items-center justify-center gap-2 overflow-hidden rounded-full border px-3 text-sm font-medium hover:bg-ink/5 ${pressed ? "border-ink bg-ink text-paper" : "border-line"} ${className}`}
     >
       {children}
     </button>
@@ -386,27 +396,27 @@ function TextBtn({ children, onClick, className = "" }: { children: ReactNode; o
 function Body({ text }: { text: string }) {
   const doc = useMemo(() => parseBody(text), [text]);
   const [trimmed, setTrimmed] = useState(false);
+  const quotedLabel = quotedControlLabel(doc.hidden, trimmed);
   return (
-    <div className="mail-body min-w-0 max-w-full space-y-3 text-[15px] font-normal leading-5 text-ink">
+    <div className="mail-body min-w-0 max-w-full space-y-4 text-[17px] font-normal leading-[1.5] text-ink">
       <BodyBlocks blocks={doc.blocks} />
-      {doc.hidden && (
+      {quotedLabel ? (
         <div>
           <button
             type="button"
             aria-expanded={trimmed}
-            aria-label={trimmed ? "Hide trimmed content" : "Show trimmed content"}
-            className="inline-flex h-8 items-center rounded-full border border-line px-2.5 text-sm leading-none text-muted hover:bg-ink/5"
+            className="inline-flex min-h-11 items-center rounded-full border border-line px-3 text-base text-ink hover:bg-ink/5"
             onClick={() => setTrimmed((open) => !open)}
           >
-            …
+            {quotedLabel}
           </button>
-          {trimmed && (
-            <div className="mt-2 space-y-3 text-muted">
+          {trimmed && doc.hidden ? (
+            <div className="mt-3 space-y-4 text-muted">
               <BodyBlocks blocks={doc.hidden} />
             </div>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -440,6 +450,13 @@ function BodyBlocks({ blocks }: { blocks: BodyBlock[] }) {
             <blockquote key={index} className="wrap-anywhere whitespace-pre-wrap border-l-2 border-line pl-3 text-muted">
               <Inlines inlines={block.inlines} />
             </blockquote>
+          );
+        }
+        if (block.kind === "machine") {
+          return (
+            <pre key={index} className="mail-machine">
+              {block.text}
+            </pre>
           );
         }
         return (

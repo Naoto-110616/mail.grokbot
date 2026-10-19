@@ -8,7 +8,8 @@ export type BodyBlock =
   | { kind: "p"; inlines: Inline[] }
   | { kind: "list"; items: Inline[][] }
   | { kind: "links"; links: { href: string; label: string }[] }
-  | { kind: "quote"; inlines: Inline[] };
+  | { kind: "quote"; inlines: Inline[] }
+  | { kind: "machine"; text: string };
 
 export type ParsedBody = {
   blocks: BodyBlock[];
@@ -22,6 +23,25 @@ export function parseBody(input: string): ParsedBody {
   if (cut == null) return { blocks: parseBlocks(lines), hidden: null };
   const hidden = parseBlocks(lines.slice(cut));
   return { blocks: parseBlocks(lines.slice(0, cut)), hidden: hidden.length ? hidden : null };
+}
+
+/** Visible label for the quoted-text control. Null when nothing is hidden. */
+export function quotedControlLabel(
+  hidden: BodyBlock[] | null,
+  open: boolean,
+): "Show quoted text" | "Hide quoted text" | null {
+  if (!hidden?.length) return null;
+  return open ? "Hide quoted text" : "Show quoted text";
+}
+
+/**
+ * One line of machine text: a long unbroken token, SQL, JSON, or a key:value log line.
+ * A long URL inside a sentence stays prose so it can still be a short link.
+ */
+export function isMachineText(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return isJsonLine(trimmed) || isSqlLine(trimmed) || isLogLine(trimmed) || isLongTokenLine(trimmed) || jsonStartDepth(trimmed) > 0;
 }
 
 /** One-line preview. Uses link labels, never a raw tracking URL, and skips a trailing quote when the message has its own text. */
@@ -124,12 +144,18 @@ export function linkify(input: string): Inline[] {
   return out;
 }
 
+const LONG_TOKEN = 48;
+const JSON_CAP = 40;
+
 function parseBlocks(lines: string[]): BodyBlock[] {
   const blocks: BodyBlock[] = [];
   let para: string[] = [];
   let list: string[] | null = null;
   let quote: string[] | null = null;
   let links: { href: string; label: string }[] | null = null;
+  let machine: string[] | null = null;
+  let jsonDepth = 0;
+  let sqlRun = false;
 
   const flushPara = () => {
     if (para.length === 0) return;
@@ -162,14 +188,40 @@ function parseBlocks(lines: string[]): BodyBlock[] {
     flushList();
     flushQuote();
   };
+  const flushMachine = () => {
+    if (machine?.some((line) => line.trim() !== "")) {
+      blocks.push({ kind: "machine", text: machine.join("\n").trimEnd() });
+    }
+    machine = null;
+    jsonDepth = 0;
+    sqlRun = false;
+  };
+  const pushMachine = (line: string, mode: "json" | "sql" | "line", depth = 0) => {
+    flushProse();
+    flushLinks();
+    if (!machine) machine = [];
+    machine.push(line);
+    sqlRun = mode === "sql";
+    if (mode === "json") jsonDepth = depth;
+  };
 
   for (const line of lines) {
+    if (jsonDepth > 0) {
+      const run: string[] = machine ?? [];
+      machine = run;
+      run.push(line);
+      jsonDepth += braceDelta(line);
+      if (jsonDepth <= 0 || run.length >= JSON_CAP) flushMachine();
+      continue;
+    }
     if (line.trim() === "") {
       flushProse();
       flushLinks();
+      flushMachine();
       continue;
     }
     if (isQuoteLine(line)) {
+      flushMachine();
       flushPara();
       flushList();
       flushLinks();
@@ -177,6 +229,16 @@ function parseBlocks(lines: string[]): BodyBlock[] {
       quote.push(line);
       continue;
     }
+    const opened = jsonStartDepth(line);
+    if (opened > 0) {
+      pushMachine(line, "json", opened);
+      continue;
+    }
+    if (isMachineText(line) || (sqlRun && isSqlContinuation(line))) {
+      pushMachine(line, isSqlLine(line) || sqlRun ? "sql" : "line");
+      continue;
+    }
+    flushMachine();
     const only = linkOnlyLine(line);
     if (only) {
       flushProse();
@@ -198,7 +260,79 @@ function parseBlocks(lines: string[]): BodyBlock[] {
   }
   flushProse();
   flushLinks();
+  flushMachine();
   return blocks;
+}
+
+function isJsonLine(line: string): boolean {
+  if (/^[[{]\s*$/.test(line) || /^[\]}]+\s*,?\s*$/.test(line)) return true;
+  if (/^[[{]/.test(line) && /[\]}]$/.test(line) && line.length > 2) return true;
+  return /^"[^"\n]+"\s*:/.test(line);
+}
+
+function isSqlLine(line: string): boolean {
+  return /^(?:select|insert|update|delete|with)\b/i.test(line) && /\b(?:from|where|set|values|into|join|select)\b/i.test(line);
+}
+
+function isSqlContinuation(line: string): boolean {
+  return /^(?:and|or|from|where|join|left|right|inner|full|cross|group|order|limit|offset|set|values|having|on|union|intersect|except)\b/i.test(
+    line.trim(),
+  );
+}
+
+function isLogLine(line: string): boolean {
+  if (/^https?:\/\//i.test(line)) return false;
+  const match = /^([A-Za-z_][\w.-]{0,48})\s*[:=]\s+(\S.*)$/.exec(line);
+  if (!match) return false;
+  const key = match[1] ?? "";
+  const value = (match[2] ?? "").trim();
+  if (!value) return false;
+  if (/^(?:note|hi|hello|thanks|thank|ps|re|fw|fwd|hey)$/i.test(key)) return false;
+  const words = value.split(/\s+/);
+  if (words.length >= 8) return false;
+  if (words.length >= 5 && /[.!?]$/.test(value)) return false;
+  return true;
+}
+
+function isLongTokenLine(line: string): boolean {
+  if (!new RegExp(`\\S{${LONG_TOKEN},}`).test(line)) return false;
+  const without = line.replace(new RegExp(`\\S{${LONG_TOKEN},}`, "g"), " ").replace(/[()[\]<>]/g, " ");
+  const words = without.split(/\s+/).filter((word) => /[A-Za-z]{4,}/.test(word));
+  return words.length === 0;
+}
+
+function jsonStartDepth(line: string): number {
+  if (!line.startsWith("{") && !line.startsWith("[")) return 0;
+  if (/[A-Za-z]{4,}/.test(line) && !/["':]/.test(line)) return 0;
+  const depth = braceDelta(line);
+  return depth > 0 ? depth : 0;
+}
+
+function braceDelta(line: string): number {
+  let depth = 0;
+  let quote = false;
+  let escape = false;
+  for (const char of line) {
+    if (quote) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (char === "\\") {
+        escape = true;
+        continue;
+      }
+      if (char === '"') quote = false;
+      continue;
+    }
+    if (char === '"') {
+      quote = true;
+      continue;
+    }
+    if (char === "{" || char === "[") depth += 1;
+    else if (char === "}" || char === "]") depth -= 1;
+  }
+  return depth;
 }
 
 function linkOnlyLine(line: string): { href: string; label: string }[] | null {
@@ -372,6 +506,7 @@ function shortDomain(href: string): string {
 function flatten(blocks: BodyBlock[]): string {
   return blocks
     .map((block) => {
+      if (block.kind === "machine") return block.text;
       if (block.kind === "p" || block.kind === "quote") return inlinePlain(block.inlines);
       if (block.kind === "list") return block.items.map(inlinePlain).join(" ");
       return block.links.map((link) => link.label).join(" ");

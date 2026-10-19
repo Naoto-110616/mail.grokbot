@@ -313,12 +313,30 @@ optgroup,
 .mail-body a,
 .mail-body pre,
 .mail-body code,
+.mail-body .mail-machine,
 .mail-body td,
 .mail-body th,
 .mail-body table {
   overflow-wrap: anywhere;
+  word-break: break-word;
   min-width: 0;
   max-width: 100%;
+}
+
+/* Machine runs wrap inside the card. Clip is a backstop; the wrap is what keeps the text visible. */
+.mail-machine {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: clip;
 }
 
 .mail-body img,

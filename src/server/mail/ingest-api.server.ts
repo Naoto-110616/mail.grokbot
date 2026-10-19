@@ -6,7 +6,9 @@ import {
   applySendResults,
   attachmentPathUnsafe,
   classifyIngestItem,
+  fromJsonWithSignals,
   mergeLooseAttachment,
+  readMailSignals,
   threadsFromMessages,
   type ClassifiedIngest,
   type IngestIdentity,
@@ -149,7 +151,7 @@ export async function upsertMessage(sql: Sql, message: Message, unread: boolean)
     JSON.stringify(message.references),
     textOrNull(message.deliveredTo),
     message.account || "primary",
-    JSON.stringify(message.from),
+    fromJsonWithSignals(message),
     JSON.stringify(message.to),
     JSON.stringify(message.cc),
     JSON.stringify(message.bcc),
@@ -365,8 +367,10 @@ export async function loadStoredIngest(sql?: Sql): Promise<IngestLoad> {
   const messages: Message[] = [];
   const unread = new Map<string, boolean>();
   for (const row of rows) {
-    const from = addressOf(readJson<unknown>(row.from_json));
+    const rawFrom = readJson<unknown>(row.from_json);
+    const from = addressOf(rawFrom);
     if (!from) continue;
+    const signals = readMailSignals(rawFrom);
     const attachments = readJson<Attachment[]>(row.attachments_json) ?? [];
     const message: Message = {
       id: row.id,
@@ -390,6 +394,8 @@ export async function loadStoredIngest(sql?: Sql): Promise<IngestLoad> {
       threadHint: row.thread_hint,
       direction: row.direction === "outbound" || row.direction === "inbound" ? row.direction : null,
     };
+    if (signals.listUnsubscribe) message.listUnsubscribe = signals.listUnsubscribe;
+    if (signals.autoSubmitted) message.autoSubmitted = signals.autoSubmitted;
     messages.push(message);
     unread.set(message.id, boolValue(row.unread));
   }

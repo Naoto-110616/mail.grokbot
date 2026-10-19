@@ -57,6 +57,10 @@ export type Message = {
   threadHint?: string | null;
   /** Null and inbound behave as inbound. Outbound is mail the owner sent. */
   direction?: "inbound" | "outbound" | null;
+  /** Present when the message carried List-Unsubscribe. Quick replies stay hidden. */
+  listUnsubscribe?: string | null;
+  /** RFC 3834 Auto-Submitted. "no" is a person. Any other value is automated. */
+  autoSubmitted?: string | null;
 };
 
 export type SeedMessage = Omit<Message, "messageId" | "inReplyTo" | "references" | "deliveredTo" | "account"> &
