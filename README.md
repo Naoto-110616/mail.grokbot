@@ -95,7 +95,7 @@ A successful write is:
 
 **thread.** Hint only. Fields: `id`, `messageIds`. It is not stored and does not decide which messages share a thread.
 
-**message.** Stored fields: `id`, `messageId`, `inReplyTo`, `references`, `deliveredTo`, `account`, `from`, `to`, `cc`, `bcc`, `subject`, `body` (or `text`), `date`, `unread`, `attachments`, `clientSendId`, `threadHint`, `direction`. `html` is ignored. `from` is required. `id` or `messageId` is required. Addresses are `{ "name", "email" }` or a string. Attachment objects on the message are `{ "id", "filename", "mime", "bytes", "path" }`. Bytes stay with the bot.
+**message.** Stored fields: `id`, `messageId`, `inReplyTo`, `references`, `deliveredTo`, `account`, `from`, `to`, `cc`, `bcc`, `subject`, `body` (or `text`), `date`, `unread`, `attachments`, `clientSendId`, `threadHint`, `direction`. `html` is ignored. `from` is required. `id` or `messageId` is required. Addresses are `{ "name", "email" }` or a string. Attachment objects on the message are `{ "id", "filename", "mime", "bytes", "path" }` plus optional `content` (standard base64). Decoded `content` is stored up to 1 MiB (1,048,576 bytes). See `docs/bot-setup.md`. Without `content`, or when it is over the cap or not valid base64, only the metadata is stored and the reader says the file is not downloaded yet.
 
 `date` is ISO-8601. Omitted `unread` defaults to true, and `unread` is written only on insert. Posting the same `id` or `messageId` again updates the content and leaves `unread` as stored. Omitted `threadHint` and `direction` on an update keep the stored values. Star, snooze, labels, folder, and trash are not changed by ingest.
 
@@ -103,7 +103,7 @@ A successful write is:
 
 Messages group by `threadHint` first. A missing or empty hint falls back to In-Reply-To and References, then one normalized subject.
 
-**attachment.** Metadata for a file sent apart from the message. Fields: `id`, `messageId`, `filename`, `mime`, `bytes`, `path`. `filename` is required. The path is a relative location the bot keeps.
+**attachment.** Metadata for a file sent apart from the message. Fields: `id`, `messageId`, `filename`, `mime`, `bytes`, `path`, and optional `content` (the same base64 field as on a message attachment). `filename` is required. The path is a relative location. Empty path is metadata with no file. `content` over 1 MiB, or not valid base64, is dropped and the metadata is still stored.
 
 **send-result.** Outcome of a reply. Fields: `clientSendId` (required), `status`, `replyToMessageId`, `sentMessageId`, `error`. `pending` and `waiting` leave the thread on "Waiting for approval in Grok Bot". `failed`, `rejected`, and `error` mark it failed. Any other status, including `sent` and `approved`, marks it sent. Do not post a send-result only because a draft was created. The same item updates the queued send only when `docs/bot-setup.md` allows that transition. The bot can poll `GET /api/outbox?status=queued` instead of waiting for the wake webhook.
 

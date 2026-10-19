@@ -107,11 +107,8 @@ export const bridgeReadAttachment = createServerFn({ method: "POST" })
     };
   })
   .handler(async ({ data }): Promise<AttachmentBody | null> => {
-    const { readIngestBytes, bodyFromBytes } = await import("@/server/mail/attachments.server");
-    const { join } = await import("node:path");
-    const bytes = await readIngestBytes(join(process.cwd(), "data", "ingest"), data.path);
-    if (!bytes) return null;
-    return bodyFromBytes(data.filename, data.mime, bytes);
+    const { readStoredAttachment } = await import("@/server/mail/attachments.server");
+    return readStoredAttachment(data);
   });
 
 export function publicConfigFallback(): PublicMailConfig {

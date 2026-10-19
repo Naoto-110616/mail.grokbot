@@ -1,6 +1,6 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { Address, Alias, Attachment, Message, Thread } from "../../lib/mail/model.ts";
+import { attachmentContentBase64, type Address, type Alias, type Attachment, type Message, type Thread } from "../../lib/mail/model.ts";
 import { groupByHeaders, normalizeMessageId, threadPlusTag } from "../../lib/mail/threading.ts";
 
 export type IngestIdentity = {
@@ -283,11 +283,24 @@ export function parseThreadHint(value: unknown): string | null {
   return trimmed;
 }
 
-function parseMessage(row: Record<string, unknown>, fallbackId: string): { message: Message; unread: boolean } | null {
+function attachmentContentMap(value: unknown): Map<string, string> {
+  const found = new Map<string, string>();
+  if (!Array.isArray(value)) return found;
+  for (const item of value) {
+    const file = asAttachment(item);
+    const content = attachmentContentBase64(item);
+    if (!file || !content) continue;
+    found.set(file.id, content);
+  }
+  return found;
+}
+
+function parseMessage(row: Record<string, unknown>, fallbackId: string): { message: Message; unread: boolean; attachmentContent: Map<string, string> } | null {
   const from = asAddress(row.from);
   if (!from) return null;
   const id = asString(row.id) || fallbackId;
   const attachments = Array.isArray(row.attachments) ? row.attachments.map(asAttachment).filter((item): item is Attachment => item !== null) : [];
+  const attachmentContent = attachmentContentMap(row.attachments);
   const signals = readMailSignals(row);
   const message: Message = {
     id,
@@ -312,7 +325,7 @@ function parseMessage(row: Record<string, unknown>, fallbackId: string): { messa
   if (signals.listUnsubscribe) message.listUnsubscribe = signals.listUnsubscribe;
   if (signals.autoSubmitted) message.autoSubmitted = signals.autoSubmitted;
   const unread = row.unread === undefined ? true : Boolean(row.unread);
-  return { message, unread };
+  return { message, unread, attachmentContent };
 }
 
 /** A path the API will not store. Empty is metadata with no file. */
@@ -348,8 +361,8 @@ export function mergeLooseAttachment(messages: Message[], attachment: Attachment
 export type ClassifiedIngest =
   | { ok: true; kind: "account"; identity: IngestIdentity }
   | { ok: true; kind: "thread" }
-  | { ok: true; kind: "message"; message: Message; unread: boolean }
-  | { ok: true; kind: "attachment"; attachment: Attachment; messageId: string | null }
+  | { ok: true; kind: "message"; message: Message; unread: boolean; attachmentContent: Map<string, string> }
+  | { ok: true; kind: "attachment"; attachment: Attachment; messageId: string | null; contentB64: string | null }
   | { ok: true; kind: "send-result"; result: SendResult }
   | { ok: false };
 
@@ -369,7 +382,7 @@ export function classifyIngestItem(value: unknown): ClassifiedIngest {
     if (!id && !messageId) return { ok: false };
     const built = parseMessage(row, id || messageId);
     if (!built?.message.id) return { ok: false };
-    return { ok: true, kind: "message", message: built.message, unread: built.unread };
+    return { ok: true, kind: "message", message: built.message, unread: built.unread, attachmentContent: built.attachmentContent };
   }
   if (kind === "attachment") {
     const attachment = asAttachment(row);
@@ -379,6 +392,7 @@ export function classifyIngestItem(value: unknown): ClassifiedIngest {
       kind: "attachment",
       attachment,
       messageId: asString(row.messageId) || null,
+      contentB64: attachmentContentBase64(row),
     };
   }
   if (kind === "send-result") {

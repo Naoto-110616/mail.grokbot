@@ -11,7 +11,7 @@ import {
   savedSearchesOf,
   type SavedSearch,
 } from "./search.ts";
-import type { OutboxItem } from "./outbox.ts";
+import { outboxItemsForThreads, type OutboxItem } from "./outbox.ts";
 import { defaultSwipePrefs, swipePrefsOf, type SwipePrefs } from "./swipe.ts";
 
 /** Placeholder address until an ingest account or config.json sets one. */
@@ -178,6 +178,11 @@ export type MailData = {
   hiddenThreadIds?: string[];
   /** Sends waiting on the bot, loaded from mail_outbound. */
   outbox?: OutboxItem[];
+  /**
+   * Client send ids and provider ids whose outbound rows should be deleted
+   * on the next save. Cleared after that save. Not a mailbox preference.
+   */
+  dropOutboxIds?: string[];
 };
 
 export const SWATCHES: Swatch[] = ["teal", "ink", "brass", "olive", "rose"];
@@ -295,10 +300,25 @@ const DENSITIES = new Set<Settings["density"]>(["comfortable", "cozy", "compact"
 const THEMES = new Set<ThemeName>(["light", "dim", "lights-out", "system"]);
 const PANES = new Set<Settings["pane"]>(["right", "none"]);
 
+/** A settings document from a text column, a driver object, or a double-encoded string. */
+function storedDocument(value: unknown): Record<string, unknown> | null {
+  let current = value;
+  if (current instanceof Uint8Array) current = new TextDecoder().decode(current);
+  for (let depth = 0; depth < 2 && typeof current === "string"; depth += 1) {
+    try {
+      current = JSON.parse(current);
+    } catch {
+      return null;
+    }
+  }
+  if (!current || typeof current !== "object" || Array.isArray(current)) return null;
+  return current as Record<string, unknown>;
+}
+
 /** One stored settings document. Null when the row is missing or not an object. */
 export function settingsFromUnknown(value: unknown): Settings | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Record<string, unknown>;
+  const row = storedDocument(value);
+  if (!row) return null;
   const base = defaultSettings();
   const density = DENSITIES.has(row.density as Settings["density"]) ? (row.density as Settings["density"]) : base.density;
   let theme = THEMES.has(row.theme as ThemeName) ? (row.theme as ThemeName) : base.theme;
@@ -326,6 +346,37 @@ export function settingsFromUnknown(value: unknown): Settings | null {
     quickReplies: quickRepliesOf(row.quickReplies),
     savedSearches: savedSearchesOf(row.savedSearches),
     recentSearches: recentSearchesOf(row.recentSearches),
+  };
+}
+
+/**
+ * Display settings saved on the server win key by key.
+ * A missing document, or a missing key, keeps the localStorage copy.
+ */
+export function hydrateDisplaySettings(stored: unknown, local: Settings): Settings {
+  const row = storedDocument(stored);
+  if (!row) return local;
+  const parsed = settingsFromUnknown(row);
+  if (!parsed) return local;
+  const themePresent = "theme" in row && (row.theme === "dark" || THEMES.has(row.theme as ThemeName));
+  return {
+    ...parsed,
+    displayName: typeof row.displayName === "string" ? parsed.displayName : local.displayName,
+    signature: typeof row.signature === "string" ? parsed.signature : local.signature,
+    density: DENSITIES.has(row.density as Settings["density"]) ? parsed.density : local.density,
+    theme: themePresent ? parsed.theme : local.theme,
+    glass: typeof row.glass === "number" && Number.isFinite(row.glass) ? parsed.glass : local.glass,
+    undoSeconds: typeof row.undoSeconds === "number" && Number.isFinite(row.undoSeconds) ? parsed.undoSeconds : local.undoSeconds,
+    pane: PANES.has(row.pane as Settings["pane"]) ? parsed.pane : local.pane,
+    defaultFrom: typeof row.defaultFrom === "string" && row.defaultFrom.includes("@") ? parsed.defaultFrom : local.defaultFrom,
+    vacationOn: typeof row.vacationOn === "boolean" ? parsed.vacationOn : local.vacationOn,
+    vacationText: typeof row.vacationText === "string" ? parsed.vacationText : local.vacationText,
+    swipePrefs: row.swipePrefs && typeof row.swipePrefs === "object" ? parsed.swipePrefs : (local.swipePrefs ?? parsed.swipePrefs),
+    senderRules: "senderRules" in row ? parsed.senderRules : local.senderRules,
+    gate: "gate" in row ? parsed.gate : local.gate,
+    quickReplies: "quickReplies" in row ? parsed.quickReplies : local.quickReplies,
+    savedSearches: "savedSearches" in row ? parsed.savedSearches : local.savedSearches,
+    recentSearches: "recentSearches" in row ? parsed.recentSearches : local.recentSearches,
   };
 }
 
@@ -942,10 +993,22 @@ export function clearDraftThread(data: MailData, threadId: string): MailData {
 
 export function hideThreadIds(data: MailData, ids: readonly string[]): MailData {
   const hidden = new Set(ids);
+  const drop = new Set(data.dropOutboxIds ?? []);
+  for (const thread of data.threads) {
+    if (!hidden.has(thread.id)) continue;
+    for (const message of thread.messages) {
+      if (message.clientSendId) drop.add(message.clientSendId);
+      if (message.messageId) drop.add(message.messageId);
+      if (message.id.startsWith("msg_") && message.id.length > 4) drop.add(message.id.slice(4));
+    }
+  }
+  const threads = data.threads.filter((thread) => !hidden.has(thread.id));
   return {
     ...data,
-    threads: data.threads.filter((thread) => !hidden.has(thread.id)),
+    threads,
     hiddenThreadIds: [...new Set([...(data.hiddenThreadIds ?? []), ...ids])],
+    outbox: outboxItemsForThreads(data.outbox ?? [], threads),
+    dropOutboxIds: [...drop],
   };
 }
 
@@ -1013,6 +1076,37 @@ export function rememberBlob(path: string, text: string) {
 
 export function previewForPath(path: string): string {
   return sessionBlobs.get(path) ?? "";
+}
+
+/** Decoded cap for optional ingest attachment `content` (base64). 1 MiB. */
+export const ATTACHMENT_CONTENT_MAX_BYTES = 1_048_576;
+
+/**
+ * Base64 `content` on an ingest attachment, or null when it is missing,
+ * empty, not base64, or larger than ATTACHMENT_CONTENT_MAX_BYTES.
+ * The caller still stores the file's metadata.
+ */
+export function attachmentContentBase64(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = (value as { content?: unknown }).content;
+  if (typeof raw !== "string") return null;
+  const compact = raw.replace(/\s/g, "");
+  if (!compact || !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) return null;
+  let binary: string;
+  try {
+    binary = atob(compact);
+  } catch {
+    return null;
+  }
+  if (binary.length === 0 || binary.length > ATTACHMENT_CONTENT_MAX_BYTES) return null;
+  let encoded = "";
+  try {
+    encoded = btoa(binary);
+  } catch {
+    return null;
+  }
+  if (encoded !== compact) return null;
+  return compact;
 }
 
 /** Bytes for a download. Base64 is decoded; text is used when there is no binary payload. */

@@ -117,25 +117,43 @@ async function upsertAccount(sql: Sql, identity: IngestIdentity, updatedAt: stri
   );
 }
 
-async function writeAttachments(sql: Sql, messageRef: string, attachments: Attachment[]): Promise<void> {
-  await sql.query(`delete from mail_attachment where message_ref = $1`, [messageRef]);
-  for (const file of attachments) {
-    if (attachmentPathUnsafe(file.path)) continue;
+async function writeAttachments(
+  sql: Sql,
+  messageRef: string,
+  attachments: Attachment[],
+  content: ReadonlyMap<string, string> = new Map(),
+): Promise<void> {
+  const safe = attachments.filter((file) => !attachmentPathUnsafe(file.path));
+  const keep = new Set(safe.map((file) => file.id));
+  const existing = await sql.query<{ id: string }>(`select id from mail_attachment where message_ref = $1`, [messageRef]);
+  for (const row of existing) {
+    if (!keep.has(String(row.id))) {
+      await sql.query(`delete from mail_attachment where message_ref = $1 and id = $2`, [messageRef, row.id]);
+    }
+  }
+  for (const file of safe) {
     const bytes = Number.isFinite(file.bytes) ? Math.max(0, Math.trunc(file.bytes)) : 0;
+    const stored = content.get(file.id) ?? null;
     await sql.query(
-      `insert into mail_attachment (id, message_ref, filename, mime, bytes, path)
-       values ($1, $2, $3, $4, $5, $6)
+      `insert into mail_attachment (id, message_ref, filename, mime, bytes, path, content_b64)
+       values ($1, $2, $3, $4, $5, $6, $7)
        on conflict (id, message_ref) do update set
          filename = excluded.filename,
          mime = excluded.mime,
          bytes = excluded.bytes,
-         path = excluded.path`,
-      [file.id, messageRef, file.filename, file.mime, bytes, file.path],
+         path = excluded.path,
+         content_b64 = coalesce(excluded.content_b64, mail_attachment.content_b64)`,
+      [file.id, messageRef, file.filename, file.mime, bytes, file.path, stored],
     );
   }
 }
 
-export async function upsertMessage(sql: Sql, message: Message, unread: boolean): Promise<void> {
+export async function upsertMessage(
+  sql: Sql,
+  message: Message,
+  unread: boolean,
+  attachmentContent: ReadonlyMap<string, string> = new Map(),
+): Promise<void> {
   const messageId = textOrNull(message.messageId);
   const id = message.id;
   const matches = await sql.query<{ id: string }>(
@@ -199,7 +217,7 @@ export async function upsertMessage(sql: Sql, message: Message, unread: boolean)
        where id = $1`,
       [keep, ...content, ...tail],
     );
-    await writeAttachments(sql, keep, safeAttachments);
+    await writeAttachments(sql, keep, safeAttachments, attachmentContent);
     return;
   }
   await sql.query(
@@ -214,7 +232,7 @@ export async function upsertMessage(sql: Sql, message: Message, unread: boolean)
      )`,
     [id, ...content, unread, ...tail],
   );
-  await writeAttachments(sql, id, safeAttachments);
+  await writeAttachments(sql, id, safeAttachments, attachmentContent);
 }
 
 async function upsertSendResult(sql: Sql, result: SendResult): Promise<void> {
@@ -243,19 +261,20 @@ async function applyItems(sql: Sql, items: StoredItem[]): Promise<{ accepted: nu
   try {
     for (const item of items) {
       if (item.kind === "account") await upsertAccount(sql, item.identity, updatedAt);
-      else if (item.kind === "message") await upsertMessage(sql, item.message, item.unread);
+      else if (item.kind === "message") await upsertMessage(sql, item.message, item.unread, item.attachmentContent);
       else if (item.kind === "attachment") {
         const bytes = Number.isFinite(item.attachment.bytes) ? Math.max(0, Math.trunc(item.attachment.bytes)) : 0;
         const messageRef = item.messageId ?? "";
         await sql.query(
-          `insert into mail_attachment (id, message_ref, filename, mime, bytes, path)
-           values ($1, $2, $3, $4, $5, $6)
+          `insert into mail_attachment (id, message_ref, filename, mime, bytes, path, content_b64)
+           values ($1, $2, $3, $4, $5, $6, $7)
            on conflict (id, message_ref) do update set
              filename = excluded.filename,
              mime = excluded.mime,
              bytes = excluded.bytes,
-             path = excluded.path`,
-          [item.attachment.id, messageRef, item.attachment.filename, item.attachment.mime, bytes, item.attachment.path],
+             path = excluded.path,
+             content_b64 = coalesce(excluded.content_b64, mail_attachment.content_b64)`,
+          [item.attachment.id, messageRef, item.attachment.filename, item.attachment.mime, bytes, item.attachment.path, item.contentB64],
         );
       } else {
         await upsertSendResult(sql, item.result);

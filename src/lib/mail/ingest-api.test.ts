@@ -13,6 +13,7 @@ const productMigration = readFileSync(new URL("../../../migrations/0002_mail.sql
 const threadHintMigration = readFileSync(new URL("../../../migrations/0005_mail_thread_hint.sql", import.meta.url), "utf8");
 const directionMigration = readFileSync(new URL("../../../migrations/0006_mail_direction.sql", import.meta.url), "utf8");
 const outboundBridgeMigration = readFileSync(new URL("../../../migrations/0008_mail_outbound_bridge.sql", import.meta.url), "utf8");
+const attachmentContentMigration = readFileSync(new URL("../../../migrations/0009_mail_attachment_content.sql", import.meta.url), "utf8");
 
 function wrap(pg: PGlite): Sql {
   const run = async <T>(text: string, params: unknown[]): Promise<T[]> => {
@@ -34,6 +35,7 @@ async function applyIngestSchema(pg: PGlite): Promise<void> {
   await pg.exec(threadHintMigration);
   await pg.exec(directionMigration);
   await pg.exec(outboundBridgeMigration);
+  await pg.exec(attachmentContentMigration);
 }
 
 async function database(): Promise<{ sql: Sql; close: () => Promise<void> }> {
@@ -222,6 +224,95 @@ describe("ingest api", () => {
         loaded.messages[0]?.attachments.map((file) => file.id).sort(),
         ["att_extra", "att_note"],
       );
+    } finally {
+      await close();
+    }
+  });
+
+  it("stores attachment content under the cap and skips bytes it cannot keep", async () => {
+    const { sql, close } = await database();
+    try {
+      const encoded = Buffer.from("ok").toString("base64");
+      const posted = await call(
+        "POST",
+        "/api/ingest",
+        {
+          items: [
+            {
+              ...message,
+              attachments: [
+                {
+                  id: "att_ok",
+                  filename: "note.txt",
+                  mime: "text/plain",
+                  bytes: 2,
+                  path: "files/note.txt",
+                  content: encoded,
+                },
+              ],
+            },
+            {
+              kind: "attachment",
+              id: "att_bad_bytes",
+              messageId: "<a@example.test>",
+              filename: "skip.txt",
+              mime: "text/plain",
+              bytes: 4,
+              path: "files/skip.txt",
+              content: "****",
+            },
+          ],
+        },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.equal(posted.status, 200);
+      assert.deepEqual(await posted.json(), { accepted: 2, skipped: 0 });
+
+      const stored = await sql.query<{ id: string; content_b64: string | null }>(
+        `select id, content_b64 from mail_attachment order by id`,
+      );
+      const ok = stored.find((row) => row.id === "att_ok");
+      const bad = stored.find((row) => row.id === "att_bad_bytes");
+      assert.equal(ok?.content_b64, encoded);
+      assert.equal(Buffer.from(ok?.content_b64 ?? "", "base64").length, 2);
+      assert.equal(bad?.content_b64, null);
+
+      const jsonRows = await sql.query<{ attachments_json: string }>(
+        `select attachments_json from mail_message where id = $1`,
+        ["msg_a"],
+      );
+      const rawJson = jsonRows[0]?.attachments_json ?? "";
+      assert.equal(rawJson.includes(encoded), false);
+      assert.equal(rawJson.includes('"content"'), false);
+
+      const loaded = await loadStoredIngest(sql);
+      const file = loaded.messages[0]?.attachments.find((item) => item.id === "att_ok");
+      assert.ok(file);
+      assert.equal(Object.hasOwn(file, "content"), false);
+
+      const again = await call(
+        "POST",
+        "/api/ingest",
+        {
+          items: [
+            {
+              ...message,
+              attachments: [
+                { id: "att_ok", filename: "note.txt", mime: "text/plain", bytes: 2, path: "files/note.txt" },
+              ],
+            },
+          ],
+        },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.equal(again.status, 200);
+      const kept = await sql.query<{ content_b64: string | null }>(
+        `select content_b64 from mail_attachment where id = $1 and message_ref = $2`,
+        ["att_ok", "msg_a"],
+      );
+      assert.equal(kept[0]?.content_b64, encoded);
     } finally {
       await close();
     }

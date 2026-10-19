@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readIngestBytes, resolveInside } from "../../server/mail/attachments.server.ts";
 import { applySendResults, classifyIngestItem, deliveryForStatus, fromJsonWithSignals, loadIngest, readMailSignals, threadsFromMessages, withOutboundOwner } from "../../server/mail/ingest.server.ts";
 import { groupByHeaders, type ThreadableMessage } from "./threading.ts";
-import { inFolder, listSender, mineSet, type Message, type Thread } from "./model.ts";
+import { ATTACHMENT_CONTENT_MAX_BYTES, attachmentContentBase64, inFolder, listSender, mineSet, type Message, type Thread } from "./model.ts";
 
 const fixtures = fileURLToPath(new URL("../../../tests/fixtures/ingest/", import.meta.url));
 
@@ -77,6 +77,37 @@ describe("ingest fixtures", () => {
     assert.equal(note?.path, "files/note.txt");
     const bytes = await readIngestBytes(fixtures, "files/note.txt");
     assert.equal(bytes?.toString("utf8"), "Notes here\n");
+  });
+
+  it("accepts attachment content under 1 MiB and drops the rest", () => {
+    const encoded = btoa("ok");
+    assert.equal(attachmentContentBase64({ content: encoded }), encoded);
+    assert.equal(attachmentContentBase64({ content: ` ${encoded.slice(0, 2)}\n${encoded.slice(2)} ` }), encoded);
+    assert.equal(attachmentContentBase64({ content: "" }), null);
+    assert.equal(attachmentContentBase64({ content: "****" }), null);
+    assert.equal(attachmentContentBase64({ content: "YQ" }), null);
+    const over = btoa("x".repeat(ATTACHMENT_CONTENT_MAX_BYTES + 1));
+    assert.equal(attachmentContentBase64({ content: over }), null);
+    const exact = btoa("x".repeat(ATTACHMENT_CONTENT_MAX_BYTES));
+    assert.equal(attachmentContentBase64({ content: exact }), exact);
+
+    const classified = classifyIngestItem({
+      kind: "message",
+      id: "msg_file",
+      from: "ada@example.com",
+      attachments: [{ id: "att_ok", filename: "note.txt", mime: "text/plain", bytes: 2, path: "files/note.txt", content: encoded }],
+    });
+    assert.equal(classified.ok && classified.kind === "message", true);
+    if (!classified.ok || classified.kind !== "message") return;
+    assert.equal(classified.attachmentContent.get("att_ok"), encoded);
+    assert.equal(Object.hasOwn(classified.message.attachments[0] ?? {}, "content"), false);
+    const loose = classifyIngestItem({
+      kind: "attachment",
+      id: "att_loose",
+      filename: "note.txt",
+      content: "****",
+    });
+    assert.equal(loose.ok && loose.kind === "attachment" && loose.contentB64, null);
   });
 
   it("groups by threadHint before headers, and keeps different hints apart", () => {

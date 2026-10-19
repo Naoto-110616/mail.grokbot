@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AttachmentBody } from "../../lib/mail/backend.ts";
 
 export function resolveInside(root: string, relPath: string): string | null {
@@ -31,4 +31,38 @@ export async function readIngestBytes(root: string, relPath: string): Promise<Bu
   } catch {
     return null;
   }
+}
+
+async function readAttachmentColumn(id: string, path: string): Promise<Buffer | null> {
+  try {
+    const { getSql } = await import("../../lib/db.ts");
+    const sql = await getSql();
+    const rows = await sql.query<{ content_b64: string | null }>(
+      `select content_b64 from mail_attachment
+       where id = $1 and content_b64 is not null and content_b64 <> ''
+       order by case when path = $2 then 0 else 1 end
+       limit 1`,
+      [id, path],
+    );
+    const encoded = rows[0]?.content_b64;
+    if (!encoded) return null;
+    const bytes = Buffer.from(encoded, "base64");
+    return bytes.length > 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stored ingest bytes, then a file under data/ingest. Null means the bytes were never stored. */
+export async function readStoredAttachment(file: {
+  id: string;
+  filename: string;
+  mime: string;
+  path: string;
+}): Promise<AttachmentBody | null> {
+  const fromDb = await readAttachmentColumn(file.id, file.path);
+  if (fromDb) return bodyFromBytes(file.filename, file.mime, fromDb);
+  const bytes = await readIngestBytes(join(process.cwd(), "data", "ingest"), file.path);
+  if (!bytes) return null;
+  return bodyFromBytes(file.filename, file.mime, bytes);
 }

@@ -54,7 +54,7 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [file, setFile] = useState<Attachment | null>(null);
   const [fileBody, setFileBody] = useState<AttachmentBody | null>(null);
-  const [fileMissing, setFileMissing] = useState(false);
+  const [fileNote, setFileNote] = useState<"missing" | "error" | null>(null);
   const loadAttachment = useMail((s) => s.loadAttachment);
   const focusRef = useRef<HTMLElement | null>(null);
 
@@ -74,20 +74,20 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
   useEffect(() => {
     if (!file) {
       setFileBody(null);
-      setFileMissing(false);
+      setFileNote(null);
       return;
     }
     let cancel = false;
     setFileBody(null);
-    setFileMissing(false);
+    setFileNote(null);
     void loadAttachment(file).then(
       (body) => {
         if (cancel) return;
-        if (!body) setFileMissing(true);
+        if (!body) setFileNote("missing");
         else setFileBody(body);
       },
       () => {
-        if (!cancel) setFileMissing(true);
+        if (!cancel) setFileNote("error");
       },
     );
     return () => {
@@ -309,8 +309,10 @@ export function Reader({ onBack, split }: { onBack: () => void; split: boolean }
       </div>
       {file && (
         <Sheet title={file.filename} onClose={() => setFile(null)} wide>
-          {fileMissing ? (
+          {fileNote === "error" ? (
             <p className="text-base text-ink">Could not read this file.</p>
+          ) : fileNote === "missing" ? (
+            <p className="text-base text-ink">Not downloaded yet.</p>
           ) : fileBody?.text ? (
             <pre className="mail-body max-h-80 max-w-full overflow-auto whitespace-pre-wrap rounded-2xl bg-paper-2 p-3 font-sans text-base text-ink">{fileBody.text}</pre>
           ) : fileBody?.base64 ? (
@@ -491,7 +493,7 @@ function Anchor({ href, label, tall = false }: { href: string; label: string; ta
       className={
         tall
           ? "wrap-anywhere inline-flex min-h-11 max-w-full items-center text-accent underline-offset-2 hover:underline"
-          : "wrap-anywhere inline max-w-full text-accent underline-offset-2 hover:underline"
+          : "mail-inline-link wrap-anywhere inline max-w-full text-accent underline-offset-2 hover:underline"
       }
     >
       {label}

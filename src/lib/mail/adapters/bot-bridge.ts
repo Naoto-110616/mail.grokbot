@@ -34,11 +34,7 @@ export const botBridge: MailBackend = {
   async getAttachment(attachment) {
     const text = previewForPath(attachment.path);
     if (text) return { filename: attachment.filename, mime: attachment.mime, text, base64: null };
-    try {
-      return await bridgeReadAttachment({ data: attachment });
-    } catch {
-      return null;
-    }
+    return bridgeReadAttachment({ data: attachment });
   },
 
   async act(data, kind, ids) {
