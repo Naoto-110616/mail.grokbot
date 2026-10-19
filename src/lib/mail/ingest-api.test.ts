@@ -566,6 +566,37 @@ describe("ingest api", () => {
     }
   });
 
+  it("stores List-Unsubscribe from a header list and keeps it when a later ingest omits headers", async () => {
+    const { sql, close } = await database();
+    try {
+      const item = {
+        ...message,
+        attachments: [] as [],
+        from: { name: "Printful", email: "hello@print.example" },
+        subject: "This week in the shop",
+        body: "New colors are in. Unsubscribe any time.",
+        headers: [{ name: "List-Unsubscribe", value: "<mailto:bye@print.example>" }],
+      };
+      const inserted = await call("POST", "/api/ingest", { items: [item] }, `Bearer ${TOKEN}`, sql);
+      assert.deepEqual(await inserted.json(), { accepted: 1, skipped: 0 });
+      const again = await call(
+        "POST",
+        "/api/ingest",
+        { items: [{ ...item, headers: undefined, body: "Still the shop note." }] },
+        `Bearer ${TOKEN}`,
+        sql,
+      );
+      assert.deepEqual(await again.json(), { accepted: 1, skipped: 0 });
+      const loaded = await loadStoredIngest(sql);
+      const stored = loaded.messages.find((row) => row.id === "msg_a");
+      assert.equal(stored?.listUnsubscribe, "<mailto:bye@print.example>");
+      assert.equal(stored?.body, "Still the shop note.");
+      assert.equal(stored?.from.email, "hello@print.example");
+    } finally {
+      await close();
+    }
+  });
+
   it("returns an empty state and rejects bad json, the wrong method, and other paths", async () => {
     const { sql, close } = await database();
     try {

@@ -237,7 +237,8 @@ export function ThreadList({
           )}
           <div className="flex shrink-0 gap-1" role="tablist" aria-label="Categories">
             {visibleTabs.map((tab) => {
-              const badge = unreadBadgeLabel(categoryCount(threads, tab.id, now, aliases, account));
+              const count = categoryCount(threads, tab.id, now, aliases, account);
+              const badge = unreadBadgeLabel(count);
               const on = category === tab.id;
               return (
                 <button
@@ -253,7 +254,14 @@ export function ThreadList({
                   }
                 >
                   {tab.label}
-                  {badge && <span className="ml-1 text-accent tabular-nums">{badge}</span>}
+                  {badge && (
+                    <span
+                      className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold tabular-nums text-accent-fg"
+                      aria-label={badge}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -271,7 +279,7 @@ export function ThreadList({
       )}
       <div
         ref={box}
-        className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-2"
+        className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-[calc(5.375rem+env(safe-area-inset-bottom))] lg:pb-2"
         onPointerDown={(event) => {
           if (!box.current || box.current.scrollTop > 0) return;
           if (event.target instanceof Element && event.target.closest(".row, button, a, input, label")) return;
@@ -313,7 +321,7 @@ export function ThreadList({
               const chips = thread.labels.map((id) => labelById.get(id)).filter((l) => l != null);
               const snippet = snippetOf(thread);
               const draftMark = Boolean(thread.draft && thread.messages.length > 0);
-              const rowPad = density === "compact" ? "items-center py-0.5" : density === "cozy" ? "items-start py-1" : "items-start py-1.5";
+              const rowPad = density === "compact" ? "h-14 items-center" : density === "cozy" ? "h-[76px] items-center" : "items-start py-1.5";
               const done = isDone(thread);
               return (
                 <li key={thread.id}>
@@ -387,82 +395,82 @@ export function ThreadList({
                         email={thread.messages[0]?.from.email ?? "draft"}
                       />
                     )}
-                    <span className="min-w-0 flex-1 overflow-hidden">
-                      <span className="flex min-w-0 items-center gap-1.5 leading-5">
+                    {density === "compact" ? (
+                      <span className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                         {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
-                        <span className="min-w-0 truncate text-sm font-bold leading-5">
+                        <span className="min-w-0 flex-1 truncate text-sm font-bold leading-5">
                           {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
+                          {thread.subject ? <span className="font-normal text-muted"> · {thread.subject}</span> : null}
                         </span>
-                        <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
+                        <span className="max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
+                        <RowActions
+                          thread={thread}
+                          chips={chips}
+                          folder={folder}
+                          onAccept={() => {
+                            const email = inboundSenders(thread).at(-1);
+                            if (email) decideSenders([email], "accepted");
+                          }}
+                          onStar={() => act("star", [thread.id])}
+                          onDone={() => act("archive", [thread.id])}
+                          onForever={() => setForeverId(thread.id)}
+                        />
                       </span>
-                      <span className="block max-w-full truncate text-sm font-bold leading-5">
-                        {thread.subject || "(no subject)"}
+                    ) : density === "cozy" ? (
+                      <span className="flex min-w-0 flex-1 flex-col justify-center overflow-hidden">
+                        <span className="flex min-w-0 items-center gap-1.5 leading-5">
+                          {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
+                          <span className="min-w-0 truncate text-sm font-bold leading-5">
+                            {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
+                          </span>
+                          <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
+                        </span>
+                        <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
+                          <span className="min-w-0 flex-1 truncate text-sm font-bold leading-5">{thread.subject || "(no subject)"}</span>
+                          <RowActions
+                            thread={thread}
+                            chips={chips}
+                            folder={folder}
+                            onAccept={() => {
+                              const email = inboundSenders(thread).at(-1);
+                              if (email) decideSenders([email], "accepted");
+                            }}
+                            onStar={() => act("star", [thread.id])}
+                            onDone={() => act("archive", [thread.id])}
+                            onForever={() => setForeverId(thread.id)}
+                          />
+                        </span>
                       </span>
-                      <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
-                        {density !== "compact" ? (
+                    ) : (
+                      <span className="min-w-0 flex-1 overflow-hidden">
+                        <span className="flex min-w-0 items-center gap-1.5 leading-5">
+                          {thread.unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label="Unread" />}
+                          <span className="min-w-0 truncate text-sm font-bold leading-5">
+                            {thread.draft && thread.messages.length === 0 ? "Draft" : sender}
+                          </span>
+                          <span className="ml-auto max-w-[7rem] shrink-0 truncate text-xs leading-4 text-muted tabular-nums">{when}</span>
+                        </span>
+                        <span className="block max-w-full truncate text-sm font-bold leading-5">{thread.subject || "(no subject)"}</span>
+                        <span className="flex min-w-0 items-center gap-0.5 overflow-hidden">
                           <span className="min-w-0 flex-1 truncate text-xs leading-4 text-muted">
                             {draftMark && <span className="text-accent">Draft · </span>}
                             {snippet}
                           </span>
-                        ) : (
-                          <span className="min-w-0 flex-1" />
-                        )}
-                        <RowChips thread={thread} chips={chips} />
-                        {folder === "blocked" && (
-                          <button
-                            type="button"
-                            className="h-11 min-w-0 max-w-full shrink truncate rounded-full px-2 text-base font-semibold text-accent"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
+                          <RowActions
+                            thread={thread}
+                            chips={chips}
+                            folder={folder}
+                            onAccept={() => {
                               const email = inboundSenders(thread).at(-1);
                               if (email) decideSenders([email], "accepted");
                             }}
-                          >
-                            Accept sender
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          aria-label={thread.starred ? "Unstar" : "Star"}
-                          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-ink/5"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            act("star", [thread.id]);
-                          }}
-                        >
-                          <Star className={thread.starred ? "size-4 fill-brass text-brass" : "size-4 text-faint"} strokeWidth={1.75} />
-                        </button>
-                        {folder === "trash" ? (
-                          <button
-                            type="button"
-                            aria-label="Delete forever"
-                            className="inline-flex h-11 shrink-0 items-center justify-center rounded-full px-2 text-base font-semibold text-danger"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setForeverId(thread.id);
-                            }}
-                          >
-                            Delete forever
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            aria-label="Done"
-                            className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-accent hover:bg-ink/5"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              act("archive", [thread.id]);
-                            }}
-                          >
-                            <Check className="size-4" strokeWidth={1.75} />
-                          </button>
-                        )}
+                            onStar={() => act("star", [thread.id])}
+                            onDone={() => act("archive", [thread.id])}
+                            onForever={() => setForeverId(thread.id)}
+                          />
+                        </span>
                       </span>
-                    </span>
+                    )}
                   </div>
                   </SwipeRow>
                 </li>
@@ -652,6 +660,86 @@ function runSwipeAction(
 
 const chipClass = "max-w-24 shrink-0 px-1.5 py-0 text-[11px] leading-4";
 
+function stopRow(event: { stopPropagation: () => void }) {
+  event.stopPropagation();
+}
+
+function RowActions({
+  thread,
+  chips,
+  folder,
+  onAccept,
+  onStar,
+  onDone,
+  onForever,
+}: {
+  thread: Thread;
+  chips: Label[];
+  folder: string;
+  onAccept: () => void;
+  onStar: () => void;
+  onDone: () => void;
+  onForever: () => void;
+}) {
+  return (
+    <>
+      <RowChips thread={thread} chips={chips} />
+      {folder === "blocked" && (
+        <button
+          type="button"
+          className="h-11 min-w-0 max-w-full shrink truncate rounded-full px-2 text-base font-semibold text-accent"
+          onPointerDown={stopRow}
+          onClick={(event) => {
+            stopRow(event);
+            onAccept();
+          }}
+        >
+          Accept sender
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label={thread.starred ? "Unstar" : "Star"}
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-ink/5"
+        onPointerDown={stopRow}
+        onClick={(event) => {
+          stopRow(event);
+          onStar();
+        }}
+      >
+        <Star className={thread.starred ? "size-4 fill-brass text-brass" : "size-4 text-faint"} strokeWidth={1.75} />
+      </button>
+      {folder === "trash" ? (
+        <button
+          type="button"
+          aria-label="Delete forever"
+          className="inline-flex h-11 shrink-0 items-center justify-center rounded-full px-2 text-base font-semibold text-danger"
+          onPointerDown={stopRow}
+          onClick={(event) => {
+            stopRow(event);
+            onForever();
+          }}
+        >
+          Delete forever
+        </button>
+      ) : (
+        <button
+          type="button"
+          aria-label="Done"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-full text-accent hover:bg-ink/5"
+          onPointerDown={stopRow}
+          onClick={(event) => {
+            stopRow(event);
+            onDone();
+          }}
+        >
+          <Check className="size-4" strokeWidth={1.75} />
+        </button>
+      )}
+    </>
+  );
+}
+
 function RowChips({ thread, chips }: { thread: Thread; chips: Label[] }) {
   if (!thread.plusTag && chips.length === 0 && !thread.important) return null;
   return (
@@ -696,7 +784,7 @@ function OutboxList({
           <RefreshCw className="size-5" strokeWidth={1.75} />
         </IconButton>
       </header>
-      <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-[calc(4.75rem+env(safe-area-inset-bottom))] lg:pb-2">
+      <div className="min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden overflow-y-auto pb-[calc(5.375rem+env(safe-area-inset-bottom))] lg:pb-2">
         {rows.length === 0 ? (
           <div className="flex h-full min-h-64 max-w-full flex-col items-center justify-center px-3 text-center">
             <p className="wrap-anywhere max-w-full text-xl font-bold text-balance">No mail waiting to send.</p>

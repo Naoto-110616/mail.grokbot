@@ -163,14 +163,21 @@ export async function upsertMessage(
   );
   const ids = matches.map((row) => String(row.id));
   const keep = ids.includes(id) ? id : (ids[0] ?? null);
-  const safeAttachments = message.attachments.filter((file) => !attachmentPathUnsafe(file.path));
+  let stored = message;
+  if (keep && (!stored.listUnsubscribe || !stored.autoSubmitted)) {
+    const prior = await sql.query<{ from_json: string }>(`select from_json from mail_message where id = $1`, [keep]);
+    const previous = readMailSignals(readJson<unknown>(prior[0]?.from_json ?? ""));
+    if (!stored.listUnsubscribe && previous.listUnsubscribe) stored = { ...stored, listUnsubscribe: previous.listUnsubscribe };
+    if (!stored.autoSubmitted && previous.autoSubmitted) stored = { ...stored, autoSubmitted: previous.autoSubmitted };
+  }
+  const safeAttachments = stored.attachments.filter((file) => !attachmentPathUnsafe(file.path));
   const content = [
     messageId,
     textOrNull(message.inReplyTo),
     JSON.stringify(message.references),
     textOrNull(message.deliveredTo),
     message.account || "primary",
-    fromJsonWithSignals(message),
+    fromJsonWithSignals(stored),
     JSON.stringify(message.to),
     JSON.stringify(message.cc),
     JSON.stringify(message.bcc),
@@ -195,9 +202,9 @@ export async function upsertMessage(
       await sql.query(`update mail_attachment set message_ref = $1 where message_ref = $2`, [keep, extra]);
       await sql.query(`delete from mail_message where id = $1`, [extra]);
     }
-    // Content updates. A missing threadHint, direction, or html keeps the stored value.
-    // unread stays as the row already has it. Star, snooze, labels, folder, and
-    // trash live on mail_thread_state and are not written here.
+    // Content updates. A missing threadHint, direction, html, List-Unsubscribe,
+    // or Auto-Submitted keeps the stored value. unread stays as the row already
+    // has it. Star, snooze, labels, folder, and trash live on mail_thread_state.
     await sql.query(
       `update mail_message set
          message_id = $2,

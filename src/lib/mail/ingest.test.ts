@@ -44,6 +44,38 @@ describe("ingest fixtures", () => {
       body: "Hi",
     });
     assert.equal(plain.ok && plain.kind === "message" && plain.message.listUnsubscribe, undefined);
+    const listed = classifyIngestItem({
+      kind: "message",
+      id: "msg_printful",
+      from: { name: "Printful", email: "hello@print.example" },
+      subject: "This week in the shop",
+      body: "New colors are in. Unsubscribe any time.",
+      headers: [
+        { name: "List-Unsubscribe", value: "<mailto:bye@print.example>, <https://print.example/unsub>" },
+        { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+      ],
+    });
+    assert.equal(listed.ok, true);
+    if (!listed.ok || listed.kind !== "message") return;
+    assert.equal(listed.message.listUnsubscribe, "<mailto:bye@print.example>, <https://print.example/unsub>");
+    const block = classifyIngestItem({
+      kind: "message",
+      id: "msg_block",
+      from: "ada@example.com",
+      headers: "List-Unsubscribe: <mailto:leave@example.com>\r\nAuto-Submitted: auto-generated\r\n",
+    });
+    assert.equal(block.ok && block.kind === "message" && block.message.listUnsubscribe, "<mailto:leave@example.com>");
+    assert.equal(block.ok && block.kind === "message" && block.message.autoSubmitted, "auto-generated");
+    const pairs = classifyIngestItem({
+      kind: "message",
+      id: "msg_pairs",
+      from: "ada@example.com",
+      headers: [["List-Unsubscribe", ["<mailto:one@example.com>", "<https://example.com/unsub>"]]],
+    });
+    assert.equal(
+      pairs.ok && pairs.kind === "message" && pairs.message.listUnsubscribe,
+      "<mailto:one@example.com>, <https://example.com/unsub>",
+    );
     if (plain.ok && plain.kind === "message") {
       assert.deepEqual(JSON.parse(fromJsonWithSignals(plain.message)), { name: "Ada", email: "ada@example.com" });
     }
@@ -77,6 +109,16 @@ describe("ingest fixtures", () => {
     assert.equal(note?.path, "files/note.txt");
     const bytes = await readIngestBytes(fixtures, "files/note.txt");
     assert.equal(bytes?.toString("utf8"), "Notes here\n");
+
+    const promo = threadFor(loaded.threads, "msg_printful");
+    const alert = threadFor(loaded.threads, "msg_botbagger");
+    assert.ok(promo);
+    assert.ok(alert);
+    assert.equal(promo.category, "promotions");
+    assert.equal(promo.messages[0]?.listUnsubscribe, "<mailto:bye@print.example>, <https://print.example/unsub>");
+    assert.equal(alert.category, "updates");
+    assert.equal(alert.messages[0]?.from.name, "BotBagger");
+    assert.equal(alert.messages[0]?.subject, "Alert: bagger offline");
   });
 
   it("accepts attachment content under 1 MiB and drops the rest", () => {

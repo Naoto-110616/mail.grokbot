@@ -71,22 +71,86 @@ function clipSignal(value: string, max: number): string | null {
   return trimmed.slice(0, max);
 }
 
-function headerValue(headers: Record<string, unknown> | null, name: string): string {
-  if (!headers) return "";
-  const want = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === want) return asString(value);
-  }
-  return "";
+function headerText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value)) return value.map(headerText).filter(Boolean).join(", ");
+  const row = asRecord(value);
+  if (!row) return "";
+  return headerText(row.value ?? row.text ?? row.val);
 }
 
-/** List-Unsubscribe and Auto-Submitted from an ingest item or a stored from_json object. */
+/** Mail providers send `headers` as a list of `{ name, value }`, not only as an object. */
+function headerPairs(value: unknown): { name: string; value: string }[] {
+  if (typeof value === "string") {
+    const unfolded = value.replace(/\r\n[ \t]+/g, " ").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const pairs: { name: string; value: string }[] = [];
+    for (const line of unfolded.split("\n")) {
+      const split = line.indexOf(":");
+      if (split <= 0) continue;
+      const name = line.slice(0, split).trim();
+      const text = line.slice(split + 1).trim();
+      if (name && text) pairs.push({ name, value: text });
+    }
+    return pairs;
+  }
+  if (Array.isArray(value)) {
+    const pairs: { name: string; value: string }[] = [];
+    for (const item of value) {
+      if (typeof item === "string") {
+        pairs.push(...headerPairs(item));
+        continue;
+      }
+      if (Array.isArray(item)) {
+        const name = headerText(item[0]);
+        const text = headerText(item[1]);
+        if (name && text) pairs.push({ name, value: text });
+        continue;
+      }
+      const row = asRecord(item);
+      if (!row) continue;
+      const name = headerText(row.name ?? row.key ?? row.header ?? row.field);
+      const text = headerText(row.value ?? row.text ?? row.val);
+      if (name && text) pairs.push({ name, value: text });
+    }
+    return pairs;
+  }
+  const record = asRecord(value);
+  if (!record) return [];
+  return Object.entries(record)
+    .map(([name, entry]) => ({ name, value: headerText(entry) }))
+    .filter((pair) => pair.name && pair.value);
+}
+
+function normalizeHeaderName(name: string): string {
+  return name
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[_\s]+/g, "-")
+    .toLowerCase();
+}
+
+function findHeader(pairs: { name: string; value: string }[], want: string): string {
+  return pairs.find((pair) => normalizeHeaderName(pair.name) === want)?.value ?? "";
+}
+
+/**
+ * List-Unsubscribe and Auto-Submitted from an ingest item or a stored from_json object.
+ * A headers list used to be dropped: `asRecord` rejects arrays, so routing never saw them.
+ */
 export function readMailSignals(value: unknown): { listUnsubscribe: string | null; autoSubmitted: string | null } {
   const row = asRecord(value);
   if (!row) return { listUnsubscribe: null, autoSubmitted: null };
-  const headers = asRecord(row.headers);
-  const list = asString(row.listUnsubscribe) || asString(row["list-unsubscribe"]) || headerValue(headers, "list-unsubscribe");
-  const auto = asString(row.autoSubmitted) || asString(row["auto-submitted"]) || headerValue(headers, "auto-submitted");
+  const own = headerPairs(
+    Object.fromEntries(Object.entries(row).filter(([key]) => key !== "headers" && key !== "from" && key !== "to" && key !== "cc" && key !== "bcc")),
+  );
+  const nested = headerPairs(row.headers);
+  const list =
+    findHeader(own, "list-unsubscribe") ||
+    findHeader(nested, "list-unsubscribe") ||
+    findHeader(own, "list-unsubscribe-post") ||
+    findHeader(nested, "list-unsubscribe-post");
+  const auto = findHeader(own, "auto-submitted") || findHeader(nested, "auto-submitted");
   return { listUnsubscribe: clipSignal(list, 2000), autoSubmitted: clipSignal(auto, 80) };
 }
 

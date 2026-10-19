@@ -1,0 +1,15 @@
+{
+  "kind": "message",
+  "id": "msg_printful",
+  "messageId": "<printful@print.example>",
+  "from": { "name": "Printful", "email": "hello@print.example" },
+  "to": [{ "name": "You", "email": "you@example.test" }],
+  "subject": "This week in the shop",
+  "body": "New colors are in. Unsubscribe any time.",
+  "date": "2026-10-19T15:00:00.000Z",
+  "unread": true,
+  "headers": [
+    { "name": "List-Unsubscribe", "value": "<mailto:bye@print.example>, <https://print.example/unsub>" },
+    { "name": "List-Unsubscribe-Post", "value": "List-Unsubscribe=One-Click" }
+  ]
+}

@@ -207,3 +207,5 @@ A `kind: "message"` item may include `html`. That string is the HTML body. It is
 The cap is **1 MiB (1,048,576 UTF-8 bytes)** per message. The 5MB request cap is unchanged. Over the cap, or when `html` is omitted or blank, the message is still accepted and any `html_body` already stored stays. A new value within the cap replaces it. Re-ingesting the same `id` or `messageId` does not reset unread, star, snooze, labels, folder, or trash.
 
 The reader shows sanitized HTML when `html_body` is present, and the plain `body` otherwise. Copy `html` when the provider message has an HTML part. Leave it off when there is only plain text.
+
+Copy `headers` on the same message item. Promos needs `List-Unsubscribe`. Updates needs `Auto-Submitted` when it is not `no`. `headers` may be an object or a list of `{ "name", "value" }`. Omitting it on a later ingest leaves the stored header in place.

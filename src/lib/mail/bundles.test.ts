@@ -104,6 +104,37 @@ describe("inbox categories", () => {
     assert.equal(classifyMessage(message({ name: "X", email: "no-reply@x.com" })), "social");
     assert.equal(classifyMessage(message({ name: "Li", email: "news@mail.linkedin.com" })), "social");
     assert.equal(classifyMessage(message({ name: "Not X", email: "ada@evilx.com" })), "primary");
+    assert.equal(
+      classifyMessage(
+        message(
+          { name: "Printful", email: "hello@print.example" },
+          { subject: "This week in the shop", body: "New colors are in. Unsubscribe any time." },
+        ),
+      ),
+      "primary",
+    );
+    assert.equal(
+      classifyMessage(
+        message(
+          { name: "Printful", email: "hello@print.example" },
+          {
+            subject: "This week in the shop",
+            body: "New colors are in. Unsubscribe any time.",
+            listUnsubscribe: "<mailto:bye@print.example>",
+          },
+        ),
+      ),
+      "promotions",
+    );
+    assert.equal(
+      classifyMessage(message({ name: "BotBagger", email: "watcher@example.com" }, { subject: "Alert: bagger offline" })),
+      "updates",
+    );
+    assert.equal(classifyMessage(message({ name: "BotBagger", email: "watcher@example.com" })), "updates");
+    assert.equal(
+      classifyMessage(message({ name: "Mina Cole", email: "mina@example.com" }, { subject: "Alert: gate open" })),
+      "updates",
+    );
   });
 
   it("classifies from the latest inbound sender and lets a sender rule win", () => {

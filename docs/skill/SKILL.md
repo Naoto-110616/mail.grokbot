@@ -22,7 +22,7 @@ The body looks like:
 2. POST one `account` item for the inbox you will read. Include the address, display name, and aliases.
 3. Call `SearchEmailThreads` with `after` set to the cursor from `GET /api/ingest/state`, or from the webhook body when that is newer.
 4. For each thread, call `ReadEmailThread`.
-5. POST one `message` item per message. Copy `messageId`, `inReplyTo`, `references`, `deliveredTo`, and the inbox id into `account`. Copy `html` when the message has an HTML body (at most 1 MiB). Attachment metadata is `{ id, filename, mime, bytes, path }`. Do not put file bytes in the JSON or the webhook.
+5. POST one `message` item per message. Copy `messageId`, `inReplyTo`, `references`, `deliveredTo`, and the inbox id into `account`. Copy `headers` (an object or a `{ name, value }` list), including `List-Unsubscribe` and `Auto-Submitted`. Copy `html` when the message has an HTML body (at most 1 MiB). Attachment metadata is `{ id, filename, mime, bytes, path }`. Do not put file bytes in the JSON or the webhook.
 6. A `thread` item is optional and is only a hint. Headers decide membership.
 
 ## send

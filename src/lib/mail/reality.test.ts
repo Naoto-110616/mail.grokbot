@@ -346,7 +346,11 @@ describe("reality wiring", () => {
     assert.ok(header.indexOf("folderLabel(folder, labels)") < header.indexOf("setSelecting(true)"));
     assert.match(list, /visibleCategoryTabs/);
     assert.match(list, /unreadBadgeLabel/);
-    assert.match(list, /pb-\[calc\(4\.75rem\+env\(safe-area-inset-bottom\)\)\] lg:pb-2/);
+    assert.match(list, /pb-\[calc\(5\.375rem\+env\(safe-area-inset-bottom\)\)\] lg:pb-2/);
+    assert.match(list, /aria-label=\{badge\}/);
+    assert.match(list, /h-14 items-center/);
+    assert.match(list, /h-\[76px\] items-center/);
+    assert.match(list, /inline-flex size-11 shrink-0 items-center justify-center rounded-full hover:bg-ink\/5/);
     assert.equal(list.includes("pb-24"), false);
     assert.match(list, /aria-label="Done"/);
     assert.match(list, /inline-flex size-11 shrink-0 items-center justify-center rounded-full text-accent/);

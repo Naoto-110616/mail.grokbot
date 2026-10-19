@@ -101,6 +101,8 @@ A hint only. The app does not store it and does not use it to decide which messa
 
 The reader sanitizes HTML before display. Scripts, forms, and event handlers are removed. Links open in a new tab with `rel="noopener noreferrer"`. Remote images stay unloaded until the person taps Show images on that message. Tracking pixels stay unloaded after that tap.
 
+`headers` is how Promos and Updates see `List-Unsubscribe` and `Auto-Submitted`. It may be an object, a raw header block, or a list of `{ "name", "value" }` (the list is what mail providers return). The same names may be top-level (`listUnsubscribe`, `List-Unsubscribe`). `List-Unsubscribe` files the thread in Promos. `Auto-Submitted` other than `no` files it in Updates. A later ingest that omits the header keeps the value already stored. Marketing copy in the body does not file Promos by itself.
+
 ## attachment
 
 Optional. Use it when the file metadata is sent separately from the message. `messageId` or a matching `id` attaches it to a message. `path` is a relative location the bot keeps. The bytes are not copied into the JSON and they are not sent on the webhook.

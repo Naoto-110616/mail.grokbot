@@ -1,5 +1,6 @@
 import { applySenderRules, inboundSenders, senderRulesOf, type SenderRule } from "./bundles.ts";
 import { emailDomain, localPart } from "./gate.ts";
+import { automatedMail } from "./quick.ts";
 import {
   CATEGORIES,
   accountOf,
@@ -46,18 +47,17 @@ function socialHost(domain: string): boolean {
   return false;
 }
 
+const ALERT_SUBJECT = /\balerts?\b/i;
+
 /**
  * Social hosts win, then bulk mail (List-Unsubscribe or a marketing local-part),
- * then automated senders. Everyone else stays in Primary.
+ * then automated senders: bots, no-reply, and alert subjects. Everyone else stays in Primary.
  */
 export function classifyMessage(message: Message): Category {
   if (socialHost(emailDomain(message.from.email))) return "social";
   const local = localPart(message.from.email);
   if ((message.listUnsubscribe ?? "").trim() || MARKETING_LOCAL.test(local)) return "promotions";
-  const submitted = (message.autoSubmitted ?? "").trim().toLowerCase();
-  const automated = submitted !== "" && submitted !== "no";
-  const name = (message.from.name ?? "").trim();
-  if (automated || UPDATE_LOCAL.test(local) || /\bbot$/i.test(name)) return "updates";
+  if (automatedMail(message) || UPDATE_LOCAL.test(local) || ALERT_SUBJECT.test(message.subject ?? "")) return "updates";
   return "primary";
 }
 
