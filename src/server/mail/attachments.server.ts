@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { AttachmentBody } from "../../lib/mail/backend.ts";
+import { lacksWritableLocalData } from "../../lib/runtime.server.ts";
 
 export function resolveInside(root: string, relPath: string): string | null {
   if (!relPath || relPath.includes("\0") || isAbsolute(relPath)) return null;
@@ -62,6 +63,7 @@ export async function readStoredAttachment(file: {
 }): Promise<AttachmentBody | null> {
   const fromDb = await readAttachmentColumn(file.id, file.path);
   if (fromDb) return bodyFromBytes(file.filename, file.mime, fromDb);
+  if (lacksWritableLocalData()) return null;
   const bytes = await readIngestBytes(join(process.cwd(), "data", "ingest"), file.path);
   if (!bytes) return null;
   return bodyFromBytes(file.filename, file.mime, bytes);

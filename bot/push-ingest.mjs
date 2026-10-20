@@ -31,6 +31,17 @@ export function bearerToken(env) {
   return String(env.INGEST_TOKEN ?? "").trim();
 }
 
+/** Optional Cloudflare Access service-token headers for ingest/outbox routes. */
+export function cloudflareAccessHeaders(env) {
+  const clientId = String(env.CF_ACCESS_CLIENT_ID ?? "").trim();
+  const clientSecret = String(env.CF_ACCESS_CLIENT_SECRET ?? "").trim();
+  if (!clientId || !clientSecret) return {};
+  return {
+    "cf-access-client-id": clientId,
+    "cf-access-client-secret": clientSecret,
+  };
+}
+
 function fail(code) {
   const error = new Error(code);
   error.code = code;
@@ -55,6 +66,7 @@ export async function pushIngest(body, env, fetchImpl = globalThis.fetch) {
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
+        ...cloudflareAccessHeaders(env),
       },
       body: bytes,
     });
@@ -93,6 +105,9 @@ function usage() {
   );
   console.error(
     "Set GBM_INGEST_TOKEN or INGEST_TOKEN. The bot keeps it in ~/.config/grokbot-mail/ with chmod 600 and never prints it.",
+  );
+  console.error(
+    "Optional: CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET for Cloudflare Access in front of ingest.",
   );
 }
 

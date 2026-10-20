@@ -1,5 +1,8 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const workspaceRoot = fileURLToPath(new URL(".", import.meta.url));
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -142,10 +145,22 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+/** Nitro deploy target. Default Cloudflare Workers; set `NITRO_PRESET=vercel` for Vercel. */
+const nitroPreset = process.env.NITRO_PRESET ?? "cloudflare_module";
+const cloudflareDeploy =
+  nitroPreset === "cloudflare_module" || nitroPreset === "cloudflare_pages";
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
-export default defineConfig(({ command, isPreview }) => ({
+export default defineConfig(({ command, isPreview }) => {
+  const building = command === "build" || isPreview;
+  return {
+  define: {
+    "import.meta.env.__CLOUDFLARE_DEPLOY__": JSON.stringify(
+      String(building && cloudflareDeploy),
+    ),
+  },
   server: {
     host: "0.0.0.0",
     port: 8080,
@@ -156,7 +171,16 @@ export default defineConfig(({ command, isPreview }) => ({
     port: 8081,
     strictPort: true,
   },
-  resolve: { tsconfigPaths: true },
+  resolve: {
+    tsconfigPaths: true,
+    ...(building && cloudflareDeploy
+      ? {
+          alias: {
+            "@electric-sql/pglite": join(workspaceRoot, "src/lib/pglite-stub.ts"),
+          },
+        }
+      : {}),
+  },
   plugins: [
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
@@ -170,7 +194,16 @@ export default defineConfig(({ command, isPreview }) => ({
     ...(command === "build" || isPreview
       ? [
           nitro({
-            preset: "vercel",
+            compatibilityDate: "2024-09-19",
+            preset: nitroPreset,
+            ...(cloudflareDeploy
+              ? {
+                  cloudflare: {
+                    deployConfig: true,
+                    nodeCompat: true,
+                  },
+                }
+              : {}),
             // Auto-registers server/middleware/* (the PWA install page +
             // manifest + head-tag middleware). Nitro v3 defaults serverDir to
             // false, so removing this silently unwires /?install=1 on deploys.
@@ -180,4 +213,5 @@ export default defineConfig(({ command, isPreview }) => ({
       : []),
     viteReact(),
   ],
-}));
+};
+});

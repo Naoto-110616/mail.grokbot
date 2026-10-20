@@ -8,6 +8,7 @@ import {
   type HeaderMode,
 } from "../../lib/mail/bot-connection.ts";
 import { demoMode } from "../../lib/env.server.ts";
+import { lacksWritableLocalData } from "../../lib/runtime.server.ts";
 import { DEMO_ADDRESS, aliasesFor, type Alias } from "../../lib/mail/model.ts";
 import { demoMailbox } from "../../lib/mail/demo-mailbox.ts";
 import { demoPublicConfig, type PublicMailConfig } from "../../lib/mail/public-config.ts";
@@ -148,6 +149,9 @@ export function webhookUrlAllowed(value: string): boolean {
 }
 
 async function readFileConfig(root: string): Promise<LoadedConfig> {
+  if (lacksWritableLocalData()) {
+    return { ...demoPublicConfig(), secrets: null, delivery: EMPTY_DELIVERY };
+  }
   try {
     const text = await readFile(join(root, "data", "config.json"), "utf8");
     return parseConfig(JSON.parse(text) as unknown);
