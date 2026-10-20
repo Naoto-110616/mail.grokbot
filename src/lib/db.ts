@@ -1,5 +1,6 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 import { neonPoolConfig } from "./pg-pool.ts";
+import { createNeonWorkersRunner } from "./neon-workers.ts";
 import { isCloudflareWorkers } from "./runtime.server.ts";
 
 /** Which database backend is active. */
@@ -97,6 +98,15 @@ function createNeonSql(): Promise<Sql> {
     // pooled endpoint. One pool per process; warm serverless instances reuse it.
     // Serverless caps the pool at 1. PGLite is never opened on this path.
     if (!databaseUrl) throw new Error("DATABASE_URL is not set");
+    if (cloudflareWorkers) {
+      return toSql(
+        createNeonWorkersRunner(databaseUrl, {
+          [OID_INT8]: Number,
+          [OID_DATE]: identity,
+          [OID_INTERVAL]: identity,
+        }),
+      );
+    }
     const { Pool, types } = await import("pg");
     types.setTypeParser(OID_INT8, Number);
     types.setTypeParser(OID_DATE, identity);

@@ -13,3 +13,6 @@ data/outbox.log
 data/ingest/**
 !data/ingest/fixtures/
 !data/ingest/fixtures/**
+
+.output/
+.wrangler/
