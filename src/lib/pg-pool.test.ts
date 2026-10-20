@@ -19,4 +19,14 @@ describe("neon pool", () => {
       idleTimeoutMillis: 5000,
     });
   });
+
+  it("treats Cloudflare Workers like serverless", () => {
+    assert.equal(isServerlessRuntime({ CF_PAGES: "1" }), true);
+    assert.equal(isServerlessRuntime({ NITRO_PRESET: "cloudflare_module" }), true);
+    assert.deepEqual(neonPoolConfig(URL, { CF_PAGES: "1" }), {
+      connectionString: URL,
+      max: 1,
+      idleTimeoutMillis: 5000,
+    });
+  });
 });

@@ -34,6 +34,74 @@ To deploy without the button:
 
 Leave `GBM_DEMO` unset on a real mailbox. `GBM_DEMO=1` replaces it with the sample inbox and does not write to Postgres.
 
+For Vercel, set `NITRO_PRESET=vercel` in the project environment so the Nitro build uses the Vercel preset. The default in this repo is `cloudflare_module` for Cloudflare Workers.
+
+## Deploy on Cloudflare Workers with Neon
+
+This fork targets [Cloudflare Workers](https://developers.cloudflare.com/workers/) on `workers.dev` with [Neon](https://neon.tech) Postgres. The app needs a real `DATABASE_URL`; there is no embedded PGLite on Workers.
+
+### 1. Neon
+
+Create a Neon project and copy:
+
+- **Pooled** connection string → Worker secret `DATABASE_URL` (runtime queries).
+- **Direct** connection string → `DATABASE_URL_UNPOOLED` on your deploy machine only (migrations).
+
+Do not commit either string.
+
+### 2. Worker secrets and vars
+
+Set these with `wrangler secret put` (secrets) or in the Cloudflare dashboard. Plain config can live in `wrangler.jsonc` `vars` if you prefer.
+
+| Name                 | Kind   | Role                                                                 |
+| -------------------- | ------ | -------------------------------------------------------------------- |
+| `DATABASE_URL`       | secret | Neon pooled Postgres URL. Required on Workers.                       |
+| `GBM_SITE_PASSWORD`  | secret | Site password for the mailbox UI.                                    |
+| `GBM_SESSION_SECRET` | secret | Signs the session cookie.                                            |
+| `GBM_INGEST_TOKEN`   | secret | Bearer token for `/api/ingest` and `/api/outbox`.                    |
+| `GBM_INBOX_ADDRESS`  | var    | Mailbox address, such as `you@example.com`.                          |
+| `GBM_OWNER_NAME`     | var    | Display name on sent mail.                                           |
+| `GBM_TAGS`           | var    | Plus-tags, comma-separated (`ops,books:Reading`).                    |
+
+Leave `GBM_DEMO` unset for a real mailbox.
+
+### 3. Build, migrate, deploy
+
+From a machine with Node.js, `DATABASE_URL` or `DATABASE_URL_UNPOOLED` for migrations, and Wrangler logged in (`wrangler login`):
+
+```sh
+npm install
+npm run deploy:cloudflare
+```
+
+`deploy:cloudflare` runs `vite build` (Nitro `cloudflare_module`, `nodejs_compat`), applies SQL migrations via `scripts/migrate.mjs`, then `wrangler deploy`. To build only: `npm run build`. To check the bundle without uploading: `npx wrangler deploy --dry-run`.
+
+Local preview against Neon (no deploy):
+
+```sh
+# set secrets in .dev.vars (gitignored) or export DATABASE_URL, GBM_* , then:
+npx wrangler dev
+```
+
+### 4. Cloudflare Access (bot routes)
+
+Protect the site and bot APIs separately:
+
+1. **Application (hostname)** — One Access app for your `*.workers.dev` (or custom) host. Policy: allow your email (one-time PIN or IdP). This covers the mailbox UI (`GBM_SITE_PASSWORD` still applies inside the app).
+
+2. **Application (path)** — Second app on the same host with paths `/api/ingest*` and `/api/outbox*`. Policy: **Service Auth** / service token. Create a service token and give the bot `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` (in addition to `GBM_INGEST_TOKEN`). `bot/push-ingest.mjs` sends those headers when both env vars are set.
+
+Ingest and outbox still require the existing `Authorization: Bearer` ingest token.
+
+### 5. Vercel vs Cloudflare
+
+| Target              | `NITRO_PRESET`        | Deploy command              |
+| ------------------- | --------------------- | --------------------------- |
+| Cloudflare Workers  | `cloudflare_module` (default) | `npm run deploy:cloudflare` |
+| Vercel              | `vercel`              | Vercel Git / `vercel deploy` |
+
+`vercel.json` only changes the Vercel install command; it is harmless on Cloudflare.
+
 ## Environment
 
 Older names still work. When both are set, the `GBM_` name wins.
@@ -51,7 +119,7 @@ Older names still work. When both are set, the `GBM_` name wins.
 
 The default signature is the display name and address from that identity. Webhook URL and key are saved in Settings, not in env. The key is write-only.
 
-Bot scripts also read `GBM_APP_ORIGIN`, `GBM_INGEST_URL`, `GBM_INGEST_PATH`, and `GBM_INGEST_FILE`. The bot keeps the ingest token in `~/.config/grokbot-mail/` with chmod 600 and never prints it.
+Bot scripts also read `GBM_APP_ORIGIN`, `GBM_INGEST_URL`, `GBM_INGEST_PATH`, and `GBM_INGEST_FILE`. Optional `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` add Cloudflare Access service-token headers on ingest POSTs. The bot keeps the ingest token in `~/.config/grokbot-mail/` with chmod 600 and never prints it.
 
 ### Self-host
 

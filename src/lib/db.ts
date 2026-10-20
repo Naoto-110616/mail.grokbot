@@ -1,5 +1,6 @@
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 import { neonPoolConfig } from "./pg-pool.ts";
+import { isCloudflareWorkers } from "./runtime.server.ts";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -17,7 +18,11 @@ const databaseUrl =
  * the app has a working database even with nothing configured — the live preview
  * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
  */
-export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
+const cloudflareWorkers =
+  typeof process !== "undefined" && isCloudflareWorkers(process.env);
+
+/** PGLite is preview-only; Cloudflare Workers always need Neon via DATABASE_URL. */
+export const dbSource: DbSource = databaseUrl ? "neon" : cloudflareWorkers ? "neon" : "pglite";
 
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
@@ -179,6 +184,9 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
+  if (cloudflareWorkers && !databaseUrl) {
+    throw new Error("DATABASE_URL is required on Cloudflare Workers");
+  }
   return dbSource === "neon" ? createNeonSql() : createPgliteSql();
 }
 
@@ -232,7 +240,7 @@ export function ensureDbReady(): Promise<void> {
 const globalBoot = globalThis as typeof globalThis & {
   __pgBootstrapPromise__?: Promise<void>;
 };
-if (typeof window === "undefined" && dbSource === "pglite") {
+if (typeof window === "undefined" && dbSource === "pglite" && !cloudflareWorkers) {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
     globalBoot.__pgBootstrapPromise__ = undefined;
     console.error("[db] PGLite bootstrap failed:", err);

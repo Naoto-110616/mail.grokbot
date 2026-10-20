@@ -4,11 +4,13 @@ export interface NeonPoolConfig {
   idleTimeoutMillis?: number;
 }
 
-/** Vercel sets `VERCEL=1` in serverless functions. Local dev leaves it unset. */
+import { isCloudflareWorkers } from "./runtime.server.ts";
+
+/** Vercel and Cloudflare Workers should use a single short-lived DB connection. */
 export function isServerlessRuntime(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
-  return env.VERCEL === "1";
+  return env.VERCEL === "1" || isCloudflareWorkers(env);
 }
 
 /**

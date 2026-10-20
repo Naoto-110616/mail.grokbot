@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { pingView } from "../../lib/mail/wake-retry.ts";
 import { pingWebhook, type WebhookBody } from "../../lib/mail/webhook-body.ts";
 import { demoMode } from "../../lib/env.server.ts";
+import { lacksWritableLocalData } from "../../lib/runtime.server.ts";
 import { webhookTarget, type MailSecrets } from "./config.server.ts";
 
 const TIMEOUT_MS = 8_000;
@@ -21,6 +22,7 @@ export function outboxRecord(action: string, status: number | null, error: strin
 }
 
 async function writeOutbox(path: string, action: string, status: number | null, error: string) {
+  if (lacksWritableLocalData()) return;
   await mkdir(dirname(path), { recursive: true });
   await appendFile(path, outboxRecord(action, status, error), "utf8");
 }

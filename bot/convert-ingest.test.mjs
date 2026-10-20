@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { convertInput, headersFrom, normalizeMessage } from "./convert-ingest.mjs";
 import { ATTACHMENT_MAX_BYTES, HTML_MAX_BYTES, REQUEST_MAX_BYTES } from "./ingest-shape.mjs";
-import { bearerToken, ingestUrl, pushIngest } from "./push-ingest.mjs";
+import { bearerToken, cloudflareAccessHeaders, ingestUrl, pushIngest } from "./push-ingest.mjs";
 
 const SMALL = Buffer.from("hello").toString("base64");
 
@@ -195,6 +195,14 @@ test("push uses env for the URL and refuses an oversized body without calling fe
     "https://app.example/hook",
   );
   assert.equal(bearerToken({}), "");
+  assert.deepEqual(cloudflareAccessHeaders({}), {});
+  assert.deepEqual(
+    cloudflareAccessHeaders({
+      CF_ACCESS_CLIENT_ID: "id",
+      CF_ACCESS_CLIENT_SECRET: "secret",
+    }),
+    { "cf-access-client-id": "id", "cf-access-client-secret": "secret" },
+  );
   const value = "abc123xyz";
   const env = { GBM_APP_ORIGIN: "https://app.example" };
   env.GBM_INGEST_TOKEN = value;
@@ -203,7 +211,18 @@ test("push uses env for the URL and refuses an oversized body without calling fe
     calls += 1;
     assert.equal(url, "https://app.example/api/ingest");
     assert.equal(init.headers.authorization, `Bearer ${value}`);
+    assert.equal(init.headers["cf-access-client-id"], undefined);
     return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+  });
+  const withAccess = {
+    ...env,
+    CF_ACCESS_CLIENT_ID: "svc-id",
+    CF_ACCESS_CLIENT_SECRET: "svc-secret",
+  };
+  await pushIngest(Buffer.from('{"items":[]}'), withAccess, async (_url, init) => {
+    assert.equal(init.headers["cf-access-client-id"], "svc-id");
+    assert.equal(init.headers["cf-access-client-secret"], "svc-secret");
+    return new Response("{}", { status: 200 });
   });
   assert.equal(calls, 1);
   assert.equal(ok.status, 401);
