@@ -93,20 +93,27 @@ function toSql(run: Run): Sql {
 }
 
 function createNeonSql(): Promise<Sql> {
-  globalRef.__pgSqlPromise__ ??= (async () => {
-    // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
-    // pooled endpoint. One pool per process; warm serverless instances reuse it.
-    // Serverless caps the pool at 1. PGLite is never opened on this path.
-    if (!databaseUrl) throw new Error("DATABASE_URL is not set");
-    if (cloudflareWorkers) {
-      return toSql(
+  if (!databaseUrl) throw new Error("DATABASE_URL is not set");
+  if (cloudflareWorkers) {
+    // A Workers isolate can interleave multiple concurrent requests over the
+    // same module state, so a runner memoized here (or in `sqlPromise` below)
+    // would share its in-flight-transaction `tx` closure across requests and
+    // corrupt/leak Neon clients. Build a fresh runner every call instead —
+    // each request's `getSql()` gets its own `tx` slot.
+    return Promise.resolve(
+      toSql(
         createNeonWorkersRunner(databaseUrl, {
           [OID_INT8]: Number,
           [OID_DATE]: identity,
           [OID_INTERVAL]: identity,
         }),
-      );
-    }
+      ),
+    );
+  }
+  globalRef.__pgSqlPromise__ ??= (async () => {
+    // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
+    // pooled endpoint. One pool per process; warm serverless instances reuse it.
+    // Serverless caps the pool at 1. PGLite is never opened on this path.
     const { Pool, types } = await import("pg");
     types.setTypeParser(OID_INT8, Number);
     types.setTypeParser(OID_DATE, identity);
@@ -201,13 +208,17 @@ async function createSql(): Promise<Sql> {
 }
 
 /**
- * Get the shared, **server-only** SQL client. Neon when `DATABASE_URL` is set,
- * otherwise the local PGLite fallback. Memoized — safe to call per request.
+ * Get the **server-only** SQL client. Neon when `DATABASE_URL` is set,
+ * otherwise the local PGLite fallback. Memoized per process — safe to call
+ * per request — except on Cloudflare Workers, where each call builds a fresh
+ * client so concurrent requests never share transaction state.
  *
  * Schema comes from `migrations/*.sql`, auto-applied before the first query on
  * both backends — define tables there, never inline in server functions.
  */
 export function getSql(): Promise<Sql> {
+  // Workers never memoize here either — see the comment in createNeonSql().
+  if (cloudflareWorkers) return createSql();
   sqlPromise ??= createSql().catch((err) => {
     sqlPromise = null; // don't memoize failures — let the next call retry
     throw err;
